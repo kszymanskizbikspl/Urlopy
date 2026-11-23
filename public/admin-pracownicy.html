@@ -102,6 +102,11 @@
         <select id="e-role"><option value="employee">Pracownik</option><option value="manager">Przełożony</option><option value="admin">Administrator</option></select></div>
     </div>
     <div class="field">
+      <label for="e-manager">Przełożony (zatwierdza wnioski)</label>
+      <select id="e-manager"></select>
+      <span class="hint">Bez przełożonego wnioski trafiają do administratorów.</span>
+    </div>
+    <div class="field">
       <label class="check"><input type="checkbox" id="e-override"><span>Popraw ręcznie zaległy urlop</span></label>
       <input id="e-carry" type="number" min="0" max="80" disabled>
       <span class="hint" id="e-carry-hint"></span>
@@ -112,7 +117,8 @@
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="e-reset" style="align-self: flex-start">Wyślij link do zmiany hasła</button>
     <div class="dialog-foot">
-      <button class="btn btn-ghost" value="cancel" formnovalidate>Anuluj</button>
+      <!-- Anuluj jako type="button": Enter w polu wysyła formularz pierwszym przyciskiem submit, czyli „Zapisz” -->
+      <button type="button" class="btn btn-ghost" id="e-cancel">Anuluj</button>
       <button class="btn" value="ok">Zapisz zmiany</button>
     </div>
   </form>
@@ -132,7 +138,12 @@ const inviteYear = () => Math.max(year(), new Date().getFullYear());
 const carryOf = a => a.carryOverride ?? a.carryAuto;
 const fullName = u => `${u.first} ${u.last}`.trim() || u.email;
 const localIso = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const editBtn = (u, a) => `<button type="button" class="btn btn-ghost btn-sm" data-edit="${u.id}" ${a ? '' : 'disabled'}>Edytuj</button>`;
+const editBtn = u => `<button type="button" class="btn btn-ghost btn-sm" data-edit="${u.id}">Edytuj</button>`;
+const isApprover = u => u.state === 'active' && (u.role === 'manager' || u.role === 'admin');
+// Wymiaru sprzed pierwszego roku osoby nie da się dodać (serwer odmawia — zmieniłby zaległy w kolejnych latach)
+const beforeFirst = (u, y) => u.firstYear != null && y < u.firstYear;
+// Ten sam warunek co `missing` w POST /api/admin/allowances/copy: aktywne konto, brak wymiaru, który da się ustawić
+const needsAllowance = (u, y) => u.state === 'active' && !u.y[y] && !beforeFirst(u, y);
 
 // Lata do wyboru: poprzedni, bieżący, następny
 (() => {
@@ -147,9 +158,9 @@ async function load() {
     const data = await api('/api/admin/users?year=' + y);
     if (y !== year()) return; // w międzyczasie zmieniono rok
     users = data.users.map(u => ({
-      id: u.id, first: u.first_name, last: u.last_name, email: u.email, role: u.role, state: u.state,
+      id: u.id, first: u.first_name, last: u.last_name, email: u.email, role: u.role, state: u.state, managerId: u.manager_id,
       invitedAt: u.invited_at && localIso(u.invited_at), inviteExpired: u.invite_expired,
-      y: { [y]: u.balance },
+      y: { [y]: u.balance }, carryAuto: u.carry_auto, firstYear: u.first_year,
     }));
     render();
   } catch (err) {
@@ -161,14 +172,14 @@ function render() {
   const y = year();
   document.querySelectorAll('.y').forEach(e => (e.textContent = y));
   $('inv-year').textContent = inviteYear();
-  $('no-year').hidden = !users.some(u => u.state !== 'invited' && !u.y[y]);
+  $('no-year').hidden = !users.some(u => needsAllowance(u, y));
   $('rows').innerHTML = users.map(u => {
     const a = u.y[y];
     const sub = u.state === 'invited'
       ? `<span class="invited">${u.invitedAt ? `Zaproszenie ${fmtNice(u.invitedAt)}` : 'Zaproszenie'}${u.inviteExpired ? ', link wygasł — wyślij ponownie' : ', konto jeszcze niezałożone'}</span>`
-      : u.state === 'disabled' ? '<span>Konto wyłączone</span>' : `<span>${ROLES[u.role]}</span>`;
+      : u.state === 'disabled' ? '<span>Konto wyłączone</span>' : `<span>${ROLES[u.role]}${managerNote(u)}</span>`;
     const who = `<td><div class="who"><strong>${esc(fullName(u))}</strong>${sub}</div></td>`;
-    const act = u.state === 'invited' ? `<button type="button" class="btn btn-ghost btn-sm" data-resend="${u.id}">Wyślij ponownie</button>` : editBtn(u, a);
+    const act = u.state === 'invited' ? `<button type="button" class="btn btn-ghost btn-sm" data-resend="${u.id}">Wyślij ponownie</button>` : editBtn(u);
     if (!a) return `<tr>${who}<td class="num muted" colspan="4">nie ustawiono</td><td>${act}</td></tr>`;
     const carry = carryOf(a), left = a.days + carry - a.used - a.pending;
     return `<tr class="${u.state === 'invited' ? 'is-invited' : ''}">${who}
@@ -177,6 +188,11 @@ function render() {
       <td class="num">${a.used}${a.pending ? ` + ${a.pending}` : ''}</td>
       <td class="num left">${left}</td><td>${act}</td></tr>`;
   }).join('') || '<tr><td colspan="6" class="muted">Brak pracowników. Zaproś pierwszą osobę formularzem obok.</td></tr>';
+}
+
+function managerNote(u) {
+  const m = u.managerId && users.find(x => x.id === u.managerId);
+  return m ? ` · przełożony: ${esc(fullName(m))}` : '';
 }
 
 /** Komunikat nad listą. ms = 0 — zostaje, aż pojawi się następny (np. link do skopiowania). */
@@ -201,9 +217,20 @@ function setDefaultDays() {
 
 $('year').addEventListener('change', load);
 
-$('copy-year').addEventListener('click', () => {
-  // POST /api/admin/allowances/copy { from: y-1, to: y } — krok 4
-  toast('Przenoszenie wymiarów na nowy rok będzie dostępne w kroku 4.', 6000, 'warn');
+$('copy-year').addEventListener('click', async e => {
+  const btn = e.currentTarget, to = year(), from = to - 1;
+  btn.disabled = true;
+  try {
+    const r = await api('/api/admin/allowances/copy', { method: 'POST', body: { from, to } });
+    await load();
+    const msg = `Przeniesiono wymiar z ${from} na ${to} dla ${r.copied} os.`;
+    if (r.missing) toast(`${msg} ${r.missing} os. nie miało wymiaru w ${from} — ustaw go przez „Edytuj”.`, 0, 'warn');
+    else toast(msg);
+  } catch (err) {
+    toast(err.message, 8000, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 $('invite-form').addEventListener('submit', async e => {
@@ -242,18 +269,40 @@ $('rows').addEventListener('click', async e => {
   }
   if (!ed) return;
   editing = users.find(x => x.id == ed.dataset.edit);
-  const a = editing.y[year()];
-  $('e-title').textContent = fullName(editing);
-  $('e-days').value = a.days;
+  editing.editYear = year();
+  const a = editing.y[editing.editYear];
+  const self = window.ME && ME.id === editing.id;
+  const locked = !a && beforeFirst(editing, editing.editYear);
+  $('e-title').textContent = fullName(editing) + (a ? '' : ` — brak wymiaru w ${editing.editYear}`);
+  // Bez wymiaru: puste pole = nie tworzyć wymiaru (zmiana samej roli czy przełożonego nie dodaje roku)
+  $('e-days').value = a ? a.days : '';
+  $('e-days').placeholder = a || locked ? '' : `np. ${defaultDays}`;
+  $('e-days').required = !!a;
+  $('e-days').disabled = locked;
   $('e-role').value = editing.role;
-  $('e-override').checked = a.carryOverride != null;
-  $('e-carry').disabled = a.carryOverride == null;
-  $('e-carry').value = carryOf(a);
-  $('e-carry-hint').textContent = `Wyliczony automatycznie z ${year() - 1}: ${plDays(a.carryAuto)}.`;
+  $('e-role').disabled = self;
+  $('e-override').checked = !!a && a.carryOverride != null;
+  $('e-override').disabled = locked;
+  setCarryEnabled($('e-override').checked);
+  $('e-carry').value = a ? carryOf(a) : editing.carryAuto;
+  $('e-carry-hint').textContent = locked
+    ? `Pierwszy wymiar tej osoby jest na ${editing.firstYear} r. — wcześniejszego roku nie można dodać.`
+    : `Wyliczony automatycznie z ${editing.editYear - 1}: ${plDays(editing.carryAuto)}.` + (a ? '' : ' Wpisz wymiar, żeby go ustawić na ten rok.');
   $('e-active').checked = editing.state !== 'disabled';
+  $('e-active').disabled = self;
+  // Przełożony: aktywne osoby z rolą Przełożony / Administrator, bez edytowanej
+  const approvers = users.filter(u => u.id !== editing.id && (isApprover(u) || u.id === editing.managerId));
+  $('e-manager').innerHTML = '<option value="">— brak (wnioski do administratorów) —</option>' +
+    approvers.map(u => `<option value="${u.id}">${esc(fullName(u))} (${ROLES[u.role]})</option>`).join('');
+  $('e-manager').value = editing.managerId ?? '';
+  // returnValue zostaje z poprzedniego zamknięcia — bez tego Escape po wcześniejszym „Zapisz” zapisałby zmiany
+  $('edit-dlg').returnValue = '';
   $('edit-dlg').showModal();
 });
-$('e-override').addEventListener('change', e => { $('e-carry').disabled = !e.target.checked; if (!e.target.checked) $('e-carry').value = editing.y[year()].carryAuto; });
+/** Ręczny zaległy: pole aktywne i wymagane tylko przy zaznaczonym checkboxie (puste pole nie zapisze się jako 0) */
+function setCarryEnabled(on) { $('e-carry').disabled = !on; $('e-carry').required = on; }
+$('e-override').addEventListener('change', e => { setCarryEnabled(e.target.checked); if (!e.target.checked) $('e-carry').value = editing.carryAuto; });
+$('e-cancel').addEventListener('click', () => $('edit-dlg').close('cancel'));
 $('e-reset').addEventListener('click', async () => {
   const u = editing;
   $('edit-dlg').close('cancel');
@@ -264,12 +313,44 @@ $('e-reset').addEventListener('click', async () => {
   }
 });
 $('edit-dlg').addEventListener('close', () => {
-  if ($('edit-dlg').returnValue === 'ok' && editing) {
-    // PATCH /api/admin/users/:id oraz PUT /api/admin/allowances/:id/:year — krok 4
-    toast('Zapisywanie zmian (wymiar, zaległy, rola, konto) będzie dostępne w kroku 4.', 6000, 'warn');
-  }
+  const u = editing;
   editing = null;
+  if ($('edit-dlg').returnValue === 'ok' && u) save(u);
 });
+
+/** Zapis okna edycji: PUT wymiaru (gdy zmieniony albo go nie było), potem PATCH osoby (tylko zmienione pola) */
+async function save(u) {
+  const y = u.editYear, a = u.y[y];
+  const daysRaw = $('e-days').value.trim();
+  const days = +daysRaw;
+  const carry = $('e-override').checked ? +$('e-carry').value : null;
+  if (!a && !daysRaw && carry != null) {
+    toast(`Ręczny zaległy zapisuje się razem z wymiarem — wpisz wymiar na ${y} r.`, 8000, 'err');
+    return;
+  }
+  const patch = {};
+  if ($('e-role').value !== u.role) patch.role = $('e-role').value;
+  const state = $('e-active').checked ? 'active' : 'disabled';
+  if (state !== u.state) patch.state = state;
+  const managerId = $('e-manager').value ? +$('e-manager').value : null;
+  if (managerId !== (u.managerId ?? null)) patch.manager_id = managerId;
+  // Bez wymiaru: tworzymy go tylko, gdy admin wpisał wymiar; z wymiarem: gdy zmienił się wymiar albo ręczny zaległy
+  const allowanceChanged = a ? a.days !== days || (a.carryOverride ?? null) !== carry : daysRaw !== '';
+  if (!allowanceChanged && !Object.keys(patch).length) return;
+  try {
+    if (allowanceChanged) await api(`/api/admin/allowances/${u.id}/${y}`, { method: 'PUT', body: { days, carry_override: carry } });
+    const r = Object.keys(patch).length ? await api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: patch }) : {};
+    await load();
+    if (r.cleared_subordinates) {
+      toast(`Zapisano zmiany: ${fullName(u)}. ${r.cleared_subordinates} os. straciło przełożonego — ich wnioski trafią do administratorów. Ustaw im nowego przełożonego.`, 0, 'warn');
+    } else {
+      toast(`Zapisano zmiany: ${fullName(u)}.`);
+    }
+  } catch (err) {
+    if (allowanceChanged) load(); // wymiar mógł się już zapisać, nawet jeśli PATCH się nie udał
+    toast(err.message, 8000, 'err');
+  }
+}
 
 meReady.then(() => {
   load();

@@ -5,6 +5,16 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+# Testy (docker compose -f docker-compose.test.yml up --build --exit-code-from tests) — nie trafiają do obrazu docelowego
+FROM deps AS test
+RUN apk add --no-cache tzdata
+ENV TZ=Europe/Warsaw
+COPY src ./src
+COPY migrations ./migrations
+COPY public ./public
+COPY test ./test
+CMD ["npm", "test"]
+
 # Etap 2: obraz docelowy bez kompilatorów
 FROM node:22-alpine
 WORKDIR /app

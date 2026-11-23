@@ -11,7 +11,8 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 1. Szkielet Express, `public/`, migracje, Docker | ✅ zrobione | `c400ec7` |
 | 2. Logowanie, sesje, ochrona stron, pierwszy admin | ✅ zrobione | `c400ec7`, poprawki `464d88b` |
 | 3. SMTP + test, zaproszenia, rejestracja, reset hasła | ✅ zrobione | `2643cdc` |
-| 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | 🟡 częściowo — lista z saldem i wyliczanie zaległego gotowe (zrobione w kroku 3), brak edycji osoby i kopiowania wymiaru | — |
+| 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | ✅ zrobione (lista z saldem już w kroku 3) | — |
+| 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | — |
 | 5. Panel pracownika: saldo, kalendarz, wnioski | ⬜ do zrobienia | — |
 | 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ⬜ do zrobienia | — |
 | 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ⬜ do zrobienia | — |
@@ -25,7 +26,7 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | `rejestracja.html` | ✅ dane z zaproszenia (`/api/invite`), zakładanie konta |
 | `reset-hasla.html` | ✅ prośba o link, ustawienie nowego hasła, wygasły link |
 | `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe; ⬜ Dni wolne w firmie — `MOCK` (krok 7) |
-| `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła; ⬜ zapis edycji osoby i „Przenieś wymiary” pokazują komunikat „krok 4” |
+| `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku” |
 | `panel.html` | ✅ nagłówek (imię, menu według roli); ⬜ saldo, wnioski, kalendarz — `MOCK` (krok 5) |
 | `admin-wnioski.html` | ⬜ `MOCK` (krok 6); licznik w menu („3”) też `MOCK` |
 
@@ -40,8 +41,14 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 - `SETTINGS_KEY` nie jest wymagany do startu — bez niego zablokowany jest tylko zapis hasła SMTP.
 - Zapisane hasło SMTP jest używane w teście wysyłki tylko z zapisanym serwerem, portem, szyfrowaniem i loginem.
 - Zaproszenie zawsze tworzy wymiar na bieżący (lub późniejszy) rok, nawet gdy lista jest przełączona na rok miniony.
+- Przełożony traci rolę (zostaje „Pracownikiem”) albo jego konto zostaje wyłączone → podwładnym czyścimy `manager_id`, a admin dostaje ostrzeżenie z liczbą osób. Ich wnioski trafią do administratorów (krok 6).
+- Admin nie zmienia własnej roli ani nie wyłącza własnego konta (robi to inny admin). Dodatkowo w transakcji: zawsze zostaje co najmniej jeden aktywny admin.
+- Zaproszonych (bez konta) się nie edytuje — mają tylko „Wyślij ponownie”.
+- „Przenieś wymiary”: kopiuje tylko `days` z roku poprzedniego (zaległy liczy automat, bez `carry_override`), pomija wyłączone konta i już ustawione wymiary. Osobom bez wymiaru w poprzednim roku admin ustawia go przez „Edytuj” (działa też dla roku bez wymiaru — wymiar powstaje tylko, gdy admin wpisze liczbę dni; sama zmiana roli czy przełożonego go nie tworzy).
+- Wymiaru na rok **przed** pierwszym wymiarem osoby nie da się dodać (409) — przesunąłby punkt startowy i dodał zaległy, którego nigdy nie było. Zaległy z kadr wpisuje się jako ręczny zaległy w pierwszym roku. Baner „Przenieś wymiary” i licznik `missing` liczą tylko aktywne konta, którym da się ustawić wymiar.
+- Testy bez Mailpit na razie — bez SMTP API zwraca link (`smtp_missing`), co wystarcza; Mailpit dojdzie przy e-mailach z decyzją (krok 6).
 
-**Jak to było testowane:** każdy krok sprawdzony w kontenerze Docker (`NODE_ENV=production`) skryptami curl/Python, e-maile przez testowy serwer Mailpit; kalendarz dat w jsdom. Dwa przeglądy kodu (`/code-review`) — wszystkie uwagi poprawione. **Testy nie są jeszcze częścią repozytorium** — warto je dodać (np. `node --test` + Mailpit w `docker-compose.test.yml`), zanim przybędzie logiki wniosków.
+**Jak to było testowane:** każdy krok sprawdzony w kontenerze Docker (`NODE_ENV=production`) skryptami curl/Python, e-maile przez testowy serwer Mailpit; kalendarz dat w jsdom. Dwa przeglądy kodu (`/code-review`) — wszystkie uwagi poprawione. **Od kroku 4 testy są w repozytorium** (`test/`, `node --test`): każdy plik uruchamia prawdziwy serwer z pustą bazą w katalogu tymczasowym i przygotowuje dane bezpośrednio w SQLite. Uruchomienie (bez Node.js na komputerze): `docker compose -f docker-compose.test.yml up --build --exit-code-from tests`. Nowa logika = nowe testy w `test/`.
 
 **Środowisko deweloperskie:** na komputerze nie ma Node.js — zależności (`npm install`) i budowanie idą przez Docker. Dysk `P:` to udział sieciowy, którego Docker Desktop nie montuje, więc lokalnie kontener działa bez wolumenu `./data` (dane znikają po usunięciu kontenera). Push na GitHub — z VS Code albo po ustawieniu `git config --global credential.helper manager`.
 
@@ -96,7 +103,9 @@ urlopy/
 │  ├─ jobs.js              ← ⬜ cron (krok 8)
 │  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  ⬜ requests.js
 ├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql
-├─ Dockerfile  docker-compose.yml  .env.example  .gitattributes
+├─ test/                   ← node --test: helpers.js (serwer + baza testowa), auth, leave, admin-users
+├─ Dockerfile              ← etapy: deps → test (tylko testy) → obraz docelowy
+├─ docker-compose.yml  docker-compose.test.yml  .env.example  .gitattributes
 └─ PLAN.md
 ```
 
@@ -240,9 +249,9 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ POST /api/admin/invitations            { email, first_name, last_name, role, days, carry, year }
 ✅ POST /api/admin/invitations/:id/resend
 ✅ POST /api/admin/users/:id/reset-password  → link do zmiany hasła wysłany przez admina
-⬜ PATCH /api/admin/users/:id             { role, state, manager_id }                              (4)
-⬜ PUT  /api/admin/allowances/:userId/:year { days, carry_override }                               (4)
-⬜ POST /api/admin/allowances/copy        { from, to }                                             (4)
+✅ PATCH /api/admin/users/:id             { role?, state?, manager_id? } → { ok, cleared_subordinates }
+✅ PUT  /api/admin/allowances/:userId/:year { days, carry_override (null = automat) } → { balance }
+✅ POST /api/admin/allowances/copy        { from, to: from+1 } → { copied, missing }
 ✅ GET|PUT /api/admin/settings            (poczta + zasady; hasło SMTP nigdy nie wraca)
 ✅ POST /api/admin/settings/smtp-test     { to, …pola formularza }
 ⬜ GET|PUT /api/admin/days-off/:year                                                             (7)
@@ -289,13 +298,13 @@ Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlo
    Zrobione: argon2id, ten sam komunikat i czas odpowiedzi niezależnie od istnienia konta, limit prób (10/e-mail, 50/IP), sesje w SQLite przetrwają restart, zablokowane konto traci dostęp od razu, ochrona stron i API według ról, Origin + CSRF. Pierwszy admin: link w logach kontenera, każdy restart do czasu rejestracji daje nowy link. Dodatkowo (wcześniej niż w planie): rejestracja z zaproszenia, `js/session.js` (imię w nagłówku, menu według roli).
 3. ✅ **Ustawienia SMTP + test wysyłki, zaproszenia, rejestracja, reset hasła.**
    Zrobione: Ustawienia → Poczta i Zasady na prawdziwym API, szyfrowane hasło SMTP, kolejka e-maili z ponowieniami, zaproszenia / ponowne wysłanie / link resetu od admina (bez poczty — link do przekazania ręcznie), samodzielny reset z wylogowaniem innych urządzeń i e-mailem „hasło zmienione”. Dodatkowo: prawdziwa lista pracowników z saldem (`leave.js`) i format dat `dd/mm/rrrr` z kalendarzem flatpickr.
-4. 🟡 **Pracownicy i wymiar urlopu, kopiowanie wymiaru na nowy rok, wyliczanie zaległego.**
-   Gotowe: lista z saldem, wyliczanie zaległego. Do zrobienia: `PATCH /api/admin/users/:id` (rola, blokada konta, przełożony `manager_id` — w oknie edycji brak jeszcze pola „przełożony”), `PUT /api/admin/allowances/:userId/:year` (wymiar, ręczny zaległy), `POST /api/admin/allowances/copy` („Przenieś wymiary z poprzedniego roku”). Uwaga: przy blokadzie konta usuwać jego sesje; nie pozwolić odebrać roli ostatniemu aktywnemu adminowi.
+4. ✅ **Pracownicy i wymiar urlopu, kopiowanie wymiaru na nowy rok, wyliczanie zaległego.**
+   Zrobione: okno edycji zapisuje wymiar i ręczny zaległy (`PUT /api/admin/allowances/…`, także dla roku bez wymiaru) oraz rolę, konto aktywne i nowe pole „Przełożony” (`PATCH /api/admin/users/:id`); „Przenieś wymiary z poprzedniego roku” (`POST /api/admin/allowances/copy`). Wyłączenie konta usuwa jego sesje; przełożony bez roli lub z wyłączonym kontem → podwładni bez przełożonego (ostrzeżenie); admin nie zmienia sam sobie roli ani nie wyłącza swojego konta; zawsze zostaje aktywny admin. Lista pokazuje przełożonego przy roli.
 5. ⬜ Panel pracownika: saldo, kalendarz (`/api/calendar`), składanie i wycofywanie wniosków.
 6. ⬜ Akceptacja wniosków, e-maile z decyzją, wykrywanie kolizji.
 7. ⬜ Dni wolne w firmie, przeliczanie wniosków, eksport CSV.
 8. ⬜ Cron: przypomnienia i zestawienie tygodniowe, log audytowy (zapis zdarzeń już działa — brak podglądu), kopie zapasowe.
-9. ⬜ (propozycja) Testy automatyczne w repozytorium — obecnie testy uruchamiane ręcznie poza repo.
+9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 28 testów — logowanie i ochrona API, saldo i zaległy, trasy kroku 4. Kolejne kroki dopisują swoje testy.
 
 Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ===== */` zastąpić wywołaniem `fetch` z komentarza obok.
 

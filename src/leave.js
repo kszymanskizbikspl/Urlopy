@@ -50,4 +50,7 @@ function balance(userId, year) {
   };
 }
 
-module.exports = { balance, carryAuto };
+/** Pierwszy rok z wymiarem (punkt startowy liczenia zaległego) albo null */
+const firstYear = userId => q.firstYear.get(userId);
+
+module.exports = { balance, carryAuto, firstYear };

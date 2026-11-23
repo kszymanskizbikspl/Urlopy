@@ -71,6 +71,9 @@ router.get('/users', adminOnly, (req, res) => {
     invited_at: u.invite_expires_at ? new Date(Date.parse(u.invite_expires_at) - 7 * DAY).toISOString() : null,
     invite_expired: u.state === 'invited' && (!u.invite_expires_at || u.invite_expires_at <= now),
     balance: leave.balance(u.id, year),
+    // zaległy wyliczony automatycznie także dla roku bez wymiaru (podpowiedź w oknie edycji)
+    carry_auto: leave.carryAuto(u.id, year),
+    first_year: leave.firstYear(u.id),   // wcześniej wymiaru nie da się ustawić (zmieniłby zaległy w kolejnych latach)
   }));
   // Zaproszeni na końcu, reszta alfabetycznie po polsku (Ł, Ś, Ż)
   users.sort((a, b) => (a.state === 'invited') - (b.state === 'invited')
@@ -81,8 +84,10 @@ router.get('/users', adminOnly, (req, res) => {
 // ---------- zaproszenia ----------
 const ROLES = ['employee', 'manager', 'admin'];
 const cleanName = v => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+// Liczba albo tekst z liczbą — bez null, '', true (Number() zamieniłby je na 0 / 1)
+const toNum = v => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
 const intIn = (v, min, max, label) => {
-  const n = Number(v);
+  const n = toNum(v);
   if (!Number.isInteger(n) || n < min || n > max) throw badRequest(`${label}: liczba całkowita ${min}–${max}.`);
   return n;
 };
@@ -148,6 +153,114 @@ router.post('/users/:id/reset-password', adminOnly, (req, res) => {
   if (state !== 'active') throw conflict(state === 'invited' ? 'Ta osoba nie założyła jeszcze konta — wyślij ponownie zaproszenie.' : 'Konto jest wyłączone.');
   const out = sendReset(id, { byAdmin: true });
   audit(req.user.id, 'reset_sent_by_admin', { id });
+  res.json(out);
+});
+
+// ---------- edycja osoby: rola, konto, przełożony ----------
+const userById = db.prepare('SELECT id, role, state, manager_id FROM users WHERE id = ?');
+const otherActiveAdmins = db.prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND state = 'active' AND id <> ?").pluck();
+const clearSubordinates = db.prepare('UPDATE users SET manager_id = NULL WHERE manager_id = ?');
+const APPROVER_ROLES = ['manager', 'admin'];
+
+router.patch('/users/:id', adminOnly, (req, res) => {
+  const id = parseId(req.params.id);
+  const b = req.body || {};
+  const changes = {};
+  if (b.role !== undefined) {
+    if (!ROLES.includes(b.role)) throw badRequest('Nieprawidłowa rola.');
+    changes.role = b.role;
+  }
+  if (b.state !== undefined) {
+    if (!['active', 'disabled'].includes(b.state)) throw badRequest('Nieprawidłowy stan konta.');
+    changes.state = b.state;
+  }
+  if (b.manager_id !== undefined) {
+    changes.manager_id = b.manager_id === null || b.manager_id === '' ? null : toNum(b.manager_id);
+    if (changes.manager_id !== null && (!Number.isInteger(changes.manager_id) || changes.manager_id < 1)) throw badRequest('Nieprawidłowy przełożony.');
+  }
+
+  const out = db.transaction(() => {
+    const u = userById.get(id);
+    if (!u) throw notFound();
+    if (u.state === 'invited') throw conflict('Ta osoba nie założyła jeszcze konta — możesz tylko wysłać ponownie zaproszenie.');
+
+    // tylko rzeczywiste zmiany
+    for (const k of Object.keys(changes)) if (changes[k] === u[k]) delete changes[k];
+
+    if (id === req.user.id && (changes.role || changes.state)) {
+      throw conflict('Nie możesz zmienić własnej roli ani wyłączyć własnego konta. Poproś o to innego administratora.');
+    }
+    if (changes.manager_id != null) {
+      if (changes.manager_id === id) throw badRequest('Osoba nie może być swoim przełożonym.');
+      const m = userById.get(changes.manager_id);
+      if (!m || m.state !== 'active' || !APPROVER_ROLES.includes(m.role)) {
+        throw badRequest('Przełożonym może być tylko aktywna osoba z rolą Przełożony lub Administrator.');
+      }
+    }
+
+    const role = changes.role ?? u.role, state = changes.state ?? u.state;
+    const wasActiveAdmin = u.role === 'admin' && u.state === 'active';
+    if (wasActiveAdmin && (role !== 'admin' || state !== 'active') && otherActiveAdmins.get(id) === 0) {
+      throw conflict('To ostatni aktywny administrator — najpierw nadaj tę rolę komuś innemu.');
+    }
+
+    const keys = Object.keys(changes);
+    if (keys.length) {
+      db.prepare(`UPDATE users SET ${keys.map(k => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...changes, id });
+    }
+    // Przestał zatwierdzać wnioski (rola albo wyłączone konto) → podwładni bez przełożonego (wnioski trafią do adminów)
+    const wasApprover = APPROVER_ROLES.includes(u.role) && u.state === 'active';
+    const isApprover = APPROVER_ROLES.includes(role) && state === 'active';
+    const cleared = wasApprover && !isApprover ? clearSubordinates.run(id).changes : 0;
+    if (keys.length || cleared) audit(req.user.id, 'user_updated', { id, ...changes, cleared_subordinates: cleared });
+    return { cleared, disabled: changes.state === 'disabled' };
+  })();
+
+  // Wyłączone konto: usunąć jego sesje (loadUser i tak odcina dostęp przy następnym żądaniu)
+  if (out.disabled) req.sessionStore.destroyUser(id);
+  res.json({ ok: true, cleared_subordinates: out.cleared });
+});
+
+// ---------- wymiar urlopu ----------
+const hasAllowance = db.prepare('SELECT 1 FROM allowances WHERE user_id = ? AND year = ?');
+
+router.put('/allowances/:userId/:year', adminOnly, (req, res) => {
+  const id = parseId(req.params.userId);
+  const year = parseYear(req.params.year);
+  const b = req.body || {};
+  const days = intIn(b.days, 0, 40, 'Wymiar urlopu');
+  const carry = b.carry_override == null || b.carry_override === '' ? null : intIn(b.carry_override, 0, 80, 'Zaległy urlop');
+  if (!getState.get(id)) throw notFound();
+  // Nowy wymiar przed pierwszym rokiem osoby przesunąłby punkt startowy i dodał zaległy, którego nigdy nie miała
+  const first = leave.firstYear(id);
+  if (first != null && year < first && !hasAllowance.get(id, year)) {
+    throw conflict(`Pierwszy wymiar tej osoby jest na ${first} r. — wcześniejszego roku nie można dodać. Zaległy z kadr wpisz jako ręczny zaległy w ${first} r.`);
+  }
+  upsertAllowance.run(id, year, days, carry);
+  audit(req.user.id, 'allowance_set', { id, year, days, carry_override: carry });
+  res.json({ balance: leave.balance(id, year) });
+});
+
+// „Przenieś wymiary z poprzedniego roku”: ten sam wymiar, zaległy liczy automat; wyłączone konta i już ustawione wymiary pominięte
+const copyAllowances = db.prepare(`
+  INSERT INTO allowances (user_id, year, days, carry_override)
+  SELECT a.user_id, @to, a.days, NULL FROM allowances a JOIN users u ON u.id = a.user_id
+  WHERE a.year = @from AND u.state <> 'disabled'
+  ON CONFLICT(user_id, year) DO NOTHING`);
+// Ile aktywnych osób nadal bez wymiaru, które admin może ustawić przez „Edytuj” (zaproszeni nie mają „Edytuj”;
+// rok przed pierwszym wymiarem osoby się nie liczy — tego wymiaru nie da się dodać). Ten sam warunek co baner na stronie.
+const withoutAllowance = db.prepare(`
+  SELECT COUNT(*) FROM users u
+  WHERE u.state = 'active'
+    AND NOT EXISTS (SELECT 1 FROM allowances a WHERE a.user_id = u.id AND a.year = @y)
+    AND COALESCE((SELECT MIN(year) FROM allowances a WHERE a.user_id = u.id), 0) < @y`).pluck();
+
+router.post('/allowances/copy', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const from = parseYear(b.from), to = parseYear(b.to);
+  if (to !== from + 1) throw badRequest('Wymiary można przenieść tylko z poprzedniego roku na następny.');
+  const out = db.transaction(() => ({ copied: copyAllowances.run({ from, to }).changes, missing: withoutAllowance.get({ y: to }) }))();
+  audit(req.user.id, 'allowances_copied', { from, to, copied: out.copied });
   res.json(out);
 });
 
