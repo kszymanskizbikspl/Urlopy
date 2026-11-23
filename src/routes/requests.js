@@ -4,6 +4,7 @@ const db = require('../db');
 const audit = require('../audit');
 const settings = require('../settings');
 const leave = require('../leave');
+const approvals = require('../approvals');
 const { requireApi } = require('../auth');
 
 const router = express.Router();
@@ -61,7 +62,7 @@ const activeUser = db.prepare("SELECT 1 FROM users WHERE id = ? AND state = 'act
 router.post('/requests', anyUser, (req, res) => {
   const r = leave.createRequest(req.user.id, req.body || {}, { isActiveUser: id => !!activeUser.get(id) });
   audit(req.user.id, 'request_created', { id: r.id, type: r.type, from: r.date_from, to: r.date_to, days: r.days });
-  // E-mail do przełożonego — krok 6 (razem ze stroną akceptacji)
+  approvals.notifyApprovers(r.id, 'request_new');
   res.status(201).json({ request: r });
 });
 
@@ -87,7 +88,8 @@ router.post('/requests/:id/cancel', anyUser, (req, res) => {
     return { id, from: r.status, status: next };
   })();
   audit(req.user.id, out.status === 'cancelled' ? 'request_cancelled' : 'request_cancel_requested', out);
-  // E-mail z prośbą o anulowanie do przełożonego — krok 6
+  // Przełożony dostał wcześniej e-mail o wniosku albo teraz prośbę o anulowanie — informujemy w obu przypadkach
+  approvals.notifyApprovers(id, out.status === 'cancel_requested' ? 'cancel_request' : 'request_withdrawn');
   res.json({ id, status: out.status });
 });
 

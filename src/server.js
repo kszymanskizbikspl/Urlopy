@@ -11,6 +11,7 @@ const authRoutes = require('./routes/auth');
 const meRoutes = require('./routes/me');
 const adminRoutes = require('./routes/admin');
 const requestRoutes = require('./routes/requests');
+const approvalRoutes = require('./routes/approvals');
 const mail = require('./mail');
 const { ensureFirstAdmin } = require('./bootstrap');
 
@@ -74,6 +75,7 @@ app.get('/', (req, res) => res.redirect(302, req.user ? '/panel.html' : '/login.
 app.use(authRoutes);
 
 app.use('/api/me', meRoutes);
+app.use('/api/admin/requests', approvalRoutes);   // przełożeni i admini (przed /api/admin — tam tylko admin)
 app.use('/api/admin', adminRoutes);
 app.use('/api', requestRoutes);         // /api/me/balance, /api/me/requests, /api/requests, /api/calendar, /api/people
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nie znaleziono' }));

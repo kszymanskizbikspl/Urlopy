@@ -8,19 +8,19 @@ const BATCH = 20;
 const KEEP_DAYS = 30;
 
 const q = {
-  insert: db.prepare(`INSERT INTO mail_queue (kind, to_addr, subject, body_text, body_html, next_attempt_at, expires_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  insert: db.prepare(`INSERT INTO mail_queue (kind, to_addr, subject, body_text, body_html, ics, next_attempt_at, expires_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   due: db.prepare(`SELECT * FROM mail_queue WHERE sent_at IS NULL AND failed_at IS NULL AND next_attempt_at <= ?
                    ORDER BY id LIMIT ${BATCH}`),
-  sent: db.prepare("UPDATE mail_queue SET sent_at = datetime('now'), attempts = attempts + 1, body_text = NULL, body_html = NULL, last_error = NULL WHERE id = ?"),
+  sent: db.prepare("UPDATE mail_queue SET sent_at = datetime('now'), attempts = attempts + 1, body_text = NULL, body_html = NULL, ics = NULL, last_error = NULL WHERE id = ?"),
   retry: db.prepare('UPDATE mail_queue SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?'),
-  failed: db.prepare("UPDATE mail_queue SET attempts = ?, failed_at = datetime('now'), last_error = ?, body_text = NULL, body_html = NULL WHERE id = ?"),
+  failed: db.prepare("UPDATE mail_queue SET attempts = ?, failed_at = datetime('now'), last_error = ?, body_text = NULL, body_html = NULL, ics = NULL WHERE id = ?"),
   prune: db.prepare(`DELETE FROM mail_queue WHERE (sent_at IS NOT NULL OR failed_at IS NOT NULL)
                      AND created_at < datetime('now', '-${KEEP_DAYS} days')`),
   pending: db.prepare('SELECT COUNT(*) FROM mail_queue WHERE sent_at IS NULL AND failed_at IS NULL').pluck(),
   stillPending: db.prepare('SELECT expires_at FROM mail_queue WHERE id = ? AND sent_at IS NULL AND failed_at IS NULL'),
   supersede: db.prepare(`UPDATE mail_queue SET failed_at = datetime('now'), last_error = 'Zastąpiona nowszą wiadomością',
-                           body_text = NULL, body_html = NULL
+                           body_text = NULL, body_html = NULL, ics = NULL
                          WHERE to_addr = ? AND kind = ? AND sent_at IS NULL AND failed_at IS NULL`),
 };
 
@@ -45,12 +45,12 @@ function describe(err) {
   return parts.join(' ').slice(0, 500);
 }
 
-/** Wiadomość do kolejki. msg: { kind, to, subject, text, html, validMs?, supersede? }
+/** Wiadomość do kolejki. msg: { kind, to, subject, text, html, ics?, validMs?, supersede? }
     supersede — niewysłane wiadomości tego rodzaju do tej osoby są anulowane (np. stary link po „Wyślij ponownie”). */
 function enqueue(msg) {
   const now = Date.now();
   if (msg.supersede) q.supersede.run(msg.to, msg.kind);
-  q.insert.run(msg.kind, msg.to, msg.subject, msg.text, msg.html || null, now, msg.validMs ? now + msg.validMs : null);
+  q.insert.run(msg.kind, msg.to, msg.subject, msg.text, msg.html || null, msg.ics || null, now, msg.validMs ? now + msg.validMs : null);
   setImmediate(processQueue);
 }
 
@@ -76,7 +76,14 @@ async function processQueue() {
       if (!now) continue;
       if (now.expires_at && now.expires_at < Date.now()) { q.failed.run(m.attempts, 'Nieaktualna (minął termin ważności)', m.id); continue; }
       try {
-        await tx.sendMail({ from: cfg.from, to: m.to_addr, subject: m.subject, text: m.body_text, html: m.body_html || undefined });
+        await tx.sendMail({
+          from: cfg.from, to: m.to_addr, subject: m.subject, text: m.body_text, html: m.body_html || undefined,
+          // urlop do kalendarza (Outlook, telefon): PUBLISH = dodaj, CANCEL = usuń wydarzenie o tym samym UID
+          attachments: m.ics ? [{
+            filename: 'urlop.ics', content: m.ics,
+            contentType: `text/calendar; charset=utf-8; method=${/METHOD:CANCEL/.test(m.ics) ? 'CANCEL' : 'PUBLISH'}`,
+          }] : undefined,
+        });
         q.sent.run(m.id);
       } catch (err) {
         const attempts = m.attempts + 1, why = describe(err);

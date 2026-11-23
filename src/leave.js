@@ -34,6 +34,25 @@ function carryAuto(userId, year, { withPending = false } = {}) {
   return carry;
 }
 
+/** Saldo z samymi zatwierdzonymi wnioskami plus dodatkowe dni (extra: { rok: dni }) — bez innych czekających.
+    Używane przy zatwierdzaniu: „co, jeśli zatwierdzę tylko ten wniosek”. Uwzględnia zaległy przenoszony na kolejne lata. */
+function leftWith(userId, year, extra = {}) {
+  const a = q.allowance.get(userId, year);
+  if (!a) return null;
+  const takenIn = y => used(userId, y) + (extra[y] || 0);
+  let carried = a.carry_override;
+  if (carried == null) {
+    const first = q.firstYear.get(userId);
+    carried = 0;
+    for (let y = first; y < year; y++) {
+      const ay = q.allowance.get(userId, y);
+      const carryIn = ay && ay.carry_override != null ? ay.carry_override : carried;
+      carried = Math.max(0, (ay ? ay.days : 0) + carryIn - takenIn(y));
+    }
+  }
+  return a.days + carried - takenIn(year);
+}
+
 /** Saldo „w najgorszym wypadku”: zaległy pomniejszony także o czekające wnioski z wcześniejszych lat.
     Używane przy składaniu wniosku, żeby wniosek na jeden rok nie zabrał zaległego, na którym opiera się następny. */
 function safeLeft(userId, year) {
@@ -69,6 +88,10 @@ const firstYear = userId => q.firstYear.get(userId);
 const PL = require('../public/js/holidays.js');
 
 const TYPES = ['wypoczynkowy', 'na_zadanie', 'okolicznosciowy', 'opieka_188', 'sila_wyzsza', 'bezplatny'];
+const TYPE_LABELS = {
+  wypoczynkowy: 'Wypoczynkowy', na_zadanie: 'Na żądanie', okolicznosciowy: 'Okolicznościowy',
+  opieka_188: 'Opieka nad dzieckiem (art. 188)', sila_wyzsza: 'Siła wyższa (art. 148¹)', bezplatny: 'Bezpłatny',
+};
 const POOL = ['wypoczynkowy', 'na_zadanie'];                    // z puli urlopu wypoczynkowego
 const LIMITS = { na_zadanie: 4, opieka_188: 2, sila_wyzsza: 2 }; // dni w roku
 const ACTIVE = "('pending', 'approved', 'cancel_requested')";     // wnioski, które „zajmują” termin i limit
@@ -167,6 +190,6 @@ const createRequest = db.transaction((userId, input, { isActiveUser }) => {
 });
 
 module.exports = {
-  balance, carryAuto, firstYear, safeLeft,
-  TYPES, POOL, LIMITS, companyDaysOff, workingDays, typeUsage, today, isIsoDate, createRequest, RequestError,
+  balance, carryAuto, firstYear, safeLeft, leftWith,
+  TYPES, TYPE_LABELS, POOL, LIMITS, companyDaysOff, workingDays, typeUsage, today, isIsoDate, createRequest, RequestError,
 };

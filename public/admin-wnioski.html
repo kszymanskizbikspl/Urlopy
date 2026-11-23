@@ -20,7 +20,7 @@
     <nav class="nav" aria-label="Główne menu">
       <a href="panel.html">Mój urlop</a>
       <!-- Linki admina pokazuje js/session.js według roli; serwer i tak sprawdza uprawnienia -->
-      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count">3</span></a>
+      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count" hidden></span></a>
       <a href="admin-pracownicy.html">Pracownicy</a>
       <a href="admin-ustawienia.html">Ustawienia</a>
     </nav>
@@ -38,12 +38,17 @@
       <h1 id="title">Wnioski do rozpatrzenia</h1>
       <p class="lead">Pracownik dostaje e-mail z decyzją od razu po kliknięciu.</p>
     </div>
+    <div class="field" id="year-box" hidden>
+      <label for="year">Rok</label>
+      <select id="year" style="min-width: 120px"></select>
+    </div>
   </div>
 
   <div class="chips" role="tablist" aria-label="Filtr wniosków" id="tabs">
     <button type="button" role="tab" data-f="pending" aria-selected="true">Do rozpatrzenia <span id="c-pending"></span></button>
     <button type="button" role="tab" data-f="approved" aria-selected="false">Zatwierdzone</button>
     <button type="button" role="tab" data-f="rejected" aria-selected="false">Odrzucone</button>
+    <button type="button" role="tab" data-f="cancelled" aria-selected="false">Anulowane</button>
     <button type="button" role="tab" data-f="all" aria-selected="false">Wszystkie</button>
   </div>
   <p class="msg msg-ok" id="toast" role="status" hidden></p>
@@ -51,17 +56,19 @@
   <div id="rows" style="display: flex; flex-direction: column; gap: 16px"></div>
 </main>
 
-<dialog id="reject-dlg">
+<!-- Jedno okno na powód: odrzucenie wniosku, anulowanie urlopu, odmowa anulowania -->
+<dialog id="reason-dlg">
   <form method="dialog">
-    <h2 class="card-title">Odrzuć wniosek</h2>
-    <p class="muted" id="reject-what"></p>
+    <h2 class="card-title" id="reason-title">Odrzuć wniosek</h2>
+    <p class="muted" id="reason-what"></p>
     <div class="field">
-      <label for="reason">Powód (pracownik zobaczy go w e-mailu)</label>
-      <textarea id="reason" required placeholder="Np. odbiór robót w tym terminie, proszę o inny"></textarea>
+      <label for="reason" id="reason-label">Powód (pracownik zobaczy go w e-mailu)</label>
+      <textarea id="reason" maxlength="500" placeholder="Np. odbiór robót w tym terminie, proszę o inny"></textarea>
     </div>
     <div class="dialog-foot">
-      <button class="btn btn-ghost" value="cancel" formnovalidate>Anuluj</button>
-      <button class="btn btn-danger" value="ok">Odrzuć wniosek</button>
+      <!-- Anuluj jako type="button": Enter w polu nie wysyła formularza tym przyciskiem -->
+      <button type="button" class="btn btn-ghost" id="reason-cancel">Anuluj</button>
+      <button class="btn btn-danger" value="ok" id="reason-ok">Odrzuć wniosek</button>
     </div>
   </form>
 </dialog>
@@ -69,92 +76,173 @@
 <script src="js/ui.js"></script>
 <script src="js/session.js"></script>
 <script>
-/* ===== MOCK — docelowo GET /api/admin/requests?status= ===== */
-const rows = [
-  { id: 51, name: 'Piotr Nowak', from: '2026-12-21', to: '2026-12-23', days: 3, type: 'wypoczynkowy', sub: 'Marta Wiśniewska', left: 9, created: '2026-11-20', status: 'pending', note: 'Sprawy Drahle przekazane Marcie.', g: 'mu' },
-  { id: 52, name: 'Marta Wiśniewska', from: '2026-12-22', to: '2026-12-23', days: 2, type: 'wypoczynkowy', sub: '', left: 5, created: '2026-11-21', status: 'pending', g: 'jej' },
-  { id: 53, name: 'Tomasz Zieliński', from: '2026-11-27', to: '2026-11-27', days: 1, type: 'na żądanie', sub: '', left: 14, created: '2026-11-23', status: 'pending', g: 'mu' },
-  { id: 48, name: 'Katarzyna Lewandowska', from: '2026-12-28', to: '2026-12-30', days: 3, type: 'wypoczynkowy', sub: 'Piotr Nowak', left: 6, created: '2026-11-02', status: 'approved', g: 'jej' },
-  { id: 33, name: 'Piotr Nowak', from: '2026-10-05', to: '2026-10-09', days: 5, type: 'wypoczynkowy', sub: '', left: 12, created: '2026-09-14', status: 'approved', g: 'mu' },
-  { id: 29, name: 'Tomasz Zieliński', from: '2026-10-19', to: '2026-10-20', days: 2, type: 'wypoczynkowy', sub: '', left: 15, created: '2026-10-01', status: 'rejected', reason: 'Odbiór DW 653', g: 'mu' },
-];
-/* ===== koniec MOCK ===== */
-// Własnych wniosków administrator tu nie widzi: trafiają do przełożonego albo drugiego admina.
+// GET /api/admin/requests?filter=&year= ; decyzje: POST /api/admin/requests/:id/approve | reject | cancel | keep
+const TYPES = { wypoczynkowy: 'wypoczynkowy', na_zadanie: 'na żądanie', okolicznosciowy: 'okolicznościowy', opieka_188: 'opieka nad dzieckiem', sila_wyzsza: 'siła wyższa', bezplatny: 'bezpłatny' };
+const POOL_TYPES = ['wypoczynkowy', 'na_zadanie'];
+const TITLES = { pending: 'Wnioski do rozpatrzenia', approved: 'Zatwierdzone wnioski', rejected: 'Odrzucone wnioski', cancelled: 'Anulowane wnioski', all: 'Wszystkie wnioski' };
+// Okno powodu dla akcji wymagających uzasadnienia
+const REASON = {
+  reject: { title: 'Odrzuć wniosek', ok: 'Odrzuć wniosek', placeholder: 'Np. odbiór robót w tym terminie, proszę o inny' },
+  cancel: { title: 'Anuluj zatwierdzony urlop', ok: 'Anuluj urlop', placeholder: 'Np. pracownik wrócił wcześniej, urlop wpisany przez pomyłkę' },
+  keep: { title: 'Nie zgadzam się na anulowanie', ok: 'Urlop zostaje', placeholder: 'Np. zastępstwo już zaplanowane' },
+};
 
-let filter = 'pending', current = null;
 const $ = id => document.getElementById(id);
-const TITLES = { pending: 'Wnioski do rozpatrzenia', approved: 'Zatwierdzone wnioski', rejected: 'Odrzucone wnioski', all: 'Wszystkie wnioski' };
+let filter = 'pending', rows = [], today = '', pending = null; // pending = { action, r } dla okna powodu
+const year = () => +$('year').value;
 
-const others = r => rows.filter(o => o.id !== r.id && o.name !== r.name && ['pending', 'approved'].includes(o.status) && o.from <= r.to && o.to >= r.from);
+(() => {
+  const y = new Date().getFullYear();
+  $('year').innerHTML = [y - 1, y, y + 1].map(v => `<option${v === y ? ' selected' : ''}>${v}</option>`).join('');
+})();
+
+// created_at / decided_at są w UTC — porównujemy i pokazujemy datę lokalną (inaczej po północy „wczoraj”)
+const created = ts => (localDate(ts) === today ? 'dziś' : fmtDate(localDate(ts)));
+const isOpen = r => r.status === 'pending' || r.status === 'cancel_requested';
+
+function alerts(r) {
+  if (!['pending', 'cancel_requested'].includes(r.status)) return '';
+  const out = [];
+  if (r.status === 'cancel_requested') out.push('<p class="msg msg-warn">Pracownik prosi o anulowanie tego zatwierdzonego urlopu. Do Twojej decyzji urlop pozostaje zatwierdzony.</p>');
+  if (r.status === 'pending' && r.date_from <= today) out.push('<p class="msg msg-warn">Termin już się zaczął albo minął — wniosek złożony po fakcie albo długo czekał na decyzję.</p>');
+  const away = r.substitute_away;
+  if (r.status === 'pending' && away) out.push(`<p class="msg msg-err">Zastępca ${esc(r.substitute)} też ${away.status === 'pending' ? 'prosi o urlop' : 'ma urlop'} ${fmtNice(away.date_from, away.date_to)}.</p>`);
+  const rest = r.overlaps.filter(o => o.user_id !== r.substitute_id);
+  if (r.status === 'pending' && rest.length) {
+    out.push(`<p class="msg msg-warn">W tym czasie nieobecni będą też: ${rest.map(o => `${esc(o.name)} (${fmtNice(o.date_from, o.date_to)}${o.status === 'pending' ? ', czeka' : ''})`).join(', ')}.</p>`);
+  }
+  return out.join('');
+}
+
+function actions(r) {
+  if (r.status === 'pending') {
+    return `<div class="req-actions"><button type="button" class="btn btn-danger" data-act="reject" data-id="${r.id}">Odrzuć</button><button type="button" class="btn" data-act="approve" data-id="${r.id}">Zatwierdź</button></div>`;
+  }
+  if (r.status === 'cancel_requested') {
+    return `<div class="req-actions"><button type="button" class="btn btn-ghost" data-act="keep" data-id="${r.id}">Nie zgadzam się</button><button type="button" class="btn" data-act="cancel" data-id="${r.id}">Zgoda na anulowanie</button></div>`;
+  }
+  const label = r.status === 'rejected' && r.decision_note ? `Odrzucony: ${esc(r.decision_note)}` : '';
+  const cancelBtn = r.status === 'approved' ? ` <button type="button" class="btn btn-ghost btn-sm" data-act="cancel" data-id="${r.id}">Anuluj urlop</button>` : '';
+  return `<div class="req-actions" style="align-items: center">${badge(r.status, label)}${cancelBtn}</div>`;
+}
 
 function card(r) {
-  const c = others(r);
-  const subAway = r.sub && c.find(o => o.name === r.sub);
-  const rest = c.filter(o => o.name !== r.sub);
-  let alert = '';
-  if (subAway) alert = `<p class="msg msg-err">Zastępca ${esc(r.sub)} też ${subAway.status === 'pending' ? 'prosi o urlop' : 'ma urlop'} ${fmtNice(subAway.from, subAway.to)}.</p>`;
-  else if (rest.length) alert = `<p class="msg msg-warn">W tym czasie nieobecni będą też: ${rest.map(o => esc(o.name)).join(', ')}.</p>`;
-  const right = r.status === 'pending'
-    ? `<div class="req-actions"><button type="button" class="btn btn-danger" data-reject="${r.id}">Odrzuć</button><button type="button" class="btn" data-approve="${r.id}">Zatwierdź</button></div>`
-    : badge(r.status, r.status === 'rejected' && r.reason ? `Odrzucony: ${esc(r.reason)}` : '');
+  const inPool = POOL_TYPES.includes(r.type);
+  const leftTxt = r.left == null ? 'brak puli' : plDays(r.left);
+  // „czeka na” tylko przy wnioskach, które jeszcze czekają — przy rozpatrzonych liczy się, kto zdecydował
+  const who = !isOpen(r) || r.mine || !r.routed_to.length ? '' : `<span class="small muted">czeka na: ${esc(r.routed_to.join(', '))}</span>`;
+  const decided = r.decided_by && r.status !== 'pending' ? `<span class="small muted">decyzja: ${esc(r.decided_by)}${r.decided_at ? ', ' + fmtDate(localDate(r.decided_at)) : ''}</span>` : '';
+  const notes = [
+    r.note ? `<p class="note">Uwagi pracownika: ${esc(r.note)}</p>` : '',
+    r.decision_note && r.status !== 'rejected' ? `<p class="note">Uwagi do decyzji: ${esc(r.decision_note)}</p>` : '',
+  ].join('');
   return `<article class="card req">
-    <div class="req-who"><strong>${esc(r.name)}</strong><span class="small muted">złożony ${r.created === new Date().toISOString().slice(0, 10) ? 'dziś' : fmtNice(r.created)}</span></div>
+    <div class="req-who"><strong>${esc(r.employee)}</strong><span class="small muted">złożony ${created(r.created_at)}</span>${who}${decided}</div>
     <div class="req-facts">
-      <div><span>Termin</span><span>${fmtNice(r.from, r.to)}</span></div>
-      <div><span>Dni</span><span>${r.days}, ${r.type}</span></div>
-      <div><span>Zostanie ${r.g}</span><span>${plDays(r.left)}</span></div>
-      <div><span>Zastępstwo</span><span>${r.sub ? esc(r.sub) : 'brak'}</span></div>
+      <div><span>Termin</span><span>${fmtNice(r.date_from, r.date_to)}</span></div>
+      <div><span>Dni</span><span>${r.days}, ${TYPES[r.type]}</span></div>
+      <div><span>${inPool ? 'Zostanie w puli' : 'Pula wypoczynkowego'}</span><span>${leftTxt}</span></div>
+      <div><span>Zastępstwo</span><span>${r.substitute ? esc(r.substitute) : 'brak'}</span></div>
     </div>
-    ${right}
-    ${r.status === 'pending' ? alert : ''}
-    ${r.note ? `<p class="note">Uwagi: ${esc(r.note)}</p>` : ''}
+    ${actions(r)}
+    ${alerts(r)}
+    ${notes}
   </article>`;
 }
 
 function render() {
-  const list = rows.filter(r => filter === 'all' || r.status === filter);
-  const pending = rows.filter(r => r.status === 'pending').length;
-  $('c-pending').textContent = pending || '';
-  $('nav-count').textContent = pending; $('nav-count').hidden = !pending;
   $('title').textContent = TITLES[filter];
-  $('rows').innerHTML = list.map(card).join('')
+  $('year-box').hidden = filter === 'pending';
+  // Ta sama definicja co licznik w menu: wnioski czekające właśnie na Twoją decyzję
+  const mine = rows.filter(r => r.mine && isOpen(r)).length;
+  $('c-pending').textContent = filter === 'pending' && mine ? mine : '';
+  $('rows').innerHTML = rows.map(card).join('')
     || `<p class="card empty" style="border-top: 1px solid var(--line)">${filter === 'pending' ? 'Wszystkie wnioski są rozpatrzone.' : 'Brak wniosków w tej kategorii.'}</p>`;
 }
 
-function toast(t) { $('toast').textContent = t; $('toast').hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => ($('toast').hidden = true), 4000); }
+function toast(t, kind = 'ok', ms = 5000) {
+  const el = $('toast');
+  el.className = 'msg msg-' + kind; el.textContent = t; el.hidden = false;
+  clearTimeout(toast.h);
+  if (ms) toast.h = setTimeout(() => (el.hidden = true), ms);
+}
+
+let loadSeq = 0;
+async function load() {
+  const seq = ++loadSeq;
+  const qs = filter === 'pending' ? 'filter=pending' : `filter=${filter}&year=${year()}`;
+  try {
+    const data = await api('/api/admin/requests?' + qs);
+    if (seq !== loadSeq) return; // w międzyczasie zmieniono filtr albo rok
+    rows = data.requests; today = data.today;
+    setNavCount(data.pending_count);
+    render();
+  } catch (err) {
+    if (seq === loadSeq) toast('Nie udało się wczytać wniosków: ' + err.message, 'err', 0);
+  }
+}
 
 $('tabs').addEventListener('click', e => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   filter = b.dataset.f;
   $('tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-selected', x === b));
-  render();
+  rows = []; render();
+  load();
 });
+$('year').addEventListener('change', load);
+
+const DONE = {
+  approve: r => `Zatwierdzono urlop: ${r.employee}, ${fmtNice(r.date_from, r.date_to)}. Pracownik dostanie e-mail.`,
+  reject: r => `Odrzucono wniosek: ${r.employee}. Pracownik dostanie e-mail z powodem.`,
+  cancel: r => (r.status === 'cancel_requested' ? `Anulowano urlop na prośbę: ${r.employee}. Dni wróciły do puli.` : `Anulowano urlop: ${r.employee}. Dni wróciły do puli.`),
+  keep: r => `Urlop zostaje: ${r.employee}. Pracownik dostanie e-mail z powodem.`,
+};
+
+async function run(action, r, reason, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/admin/requests/${r.id}/${action}`, { method: 'POST', body: reason ? { reason } : {} });
+  } catch (err) {
+    toast(err.message, 'err', 10000);
+    if (btn) btn.disabled = false;
+    if (err.status === 409 || err.status === 404) load(); // stan się zmienił (np. zdecydował ktoś inny) — pokazujemy aktualny
+    return;
+  }
+  toast(DONE[action](r));
+  load();
+}
 
 $('rows').addEventListener('click', e => {
-  const a = e.target.closest('[data-approve]'), r = e.target.closest('[data-reject]');
-  if (a) {
-    const row = rows.find(x => x.id == a.dataset.approve);
-    // Docelowo: POST /api/admin/requests/:id/approve
-    row.status = 'approved'; render();
-    toast(`Zatwierdzono urlop: ${row.name}, ${fmtNice(row.from, row.to)}. Wysłano e-mail.`);
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const r = rows.find(x => x.id == b.dataset.id);
+  const action = b.dataset.act;
+  // Zgoda na anulowanie na prośbę pracownika — bez powodu; anulowanie zatwierdzonego przez przełożonego — z powodem
+  const needReason = action === 'reject' || action === 'keep' || (action === 'cancel' && r.status === 'approved');
+  if (!needReason) {
+    if (action === 'cancel' && !confirm(`Anulować urlop ${r.employee}, ${fmtNice(r.date_from, r.date_to)}? Dni wrócą do puli.`)) return;
+    run(action, r, null, b);
+    return;
   }
-  if (r) {
-    current = rows.find(x => x.id == r.dataset.reject);
-    $('reject-what').textContent = `${current.name}, ${fmtNice(current.from, current.to)} (${plDays(current.days)})`;
-    $('reason').value = '';
-    $('reject-dlg').showModal();
-  }
+  const c = REASON[action];
+  pending = { action, r };
+  $('reason-title').textContent = c.title;
+  $('reason-ok').textContent = c.ok;
+  $('reason').placeholder = c.placeholder;
+  $('reason').required = true;
+  $('reason').value = '';
+  $('reason-what').textContent = `${r.employee}, ${fmtNice(r.date_from, r.date_to)} (${plDays(r.days)})`;
+  $('reason-dlg').returnValue = ''; // bez tego Escape po wcześniejszym „OK” wysłałby decyzję
+  $('reason-dlg').showModal();
+});
+$('reason-cancel').addEventListener('click', () => $('reason-dlg').close('cancel'));
+$('reason-dlg').addEventListener('close', () => {
+  const p = pending;
+  pending = null;
+  if ($('reason-dlg').returnValue !== 'ok' || !p) return;
+  run(p.action, p.r, $('reason').value.trim());
 });
 
-$('reject-dlg').addEventListener('close', () => {
-  if ($('reject-dlg').returnValue !== 'ok' || !current) return;
-  // Docelowo: POST /api/admin/requests/:id/reject { reason }
-  current.status = 'rejected'; current.reason = $('reason').value.trim();
-  render(); toast(`Odrzucono wniosek: ${current.name}. Wysłano e-mail z powodem.`);
-  current = null;
-});
-
-render();
+meReady.then(load);
 </script>
 </body>
 </html>

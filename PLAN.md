@@ -13,8 +13,8 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 3. SMTP + test, zaproszenia, rejestracja, reset hasła | ✅ zrobione | `2643cdc` |
 | 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | ✅ zrobione (lista z saldem już w kroku 3) | `bcb1357` |
 | 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | `bcb1357` |
-| 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | — |
-| 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ⬜ do zrobienia | — |
+| 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | `2467afa` |
+| 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ✅ zrobione | — |
 | 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ⬜ do zrobienia | — |
 | 8. Cron, log audytowy, kopie zapasowe | ⬜ do zrobienia (log audytowy już zapisuje zdarzenia) | — |
 
@@ -27,8 +27,9 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | `reset-hasla.html` | ✅ prośba o link, ustawienie nowego hasła, wygasły link |
 | `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe; ⬜ Dni wolne w firmie — `MOCK` (krok 7) |
 | `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku” |
-| `panel.html` | ✅ nagłówek, saldo (z zaległym i limitem „na żądanie”), kalendarz z dniami wolnymi firmy, podgląd wniosku (dni, saldo po akceptacji, limity, kolizje, kto ma wtedy urlop), składanie, wycofywanie, prośba o anulowanie; ⬜ licznik „3” przy „Wnioski” w menu — `MOCK` (krok 6) |
-| `admin-wnioski.html` | ⬜ `MOCK` (krok 6); licznik w menu („3”) też `MOCK` |
+| `panel.html` | ✅ nagłówek, saldo (z zaległym i limitem „na żądanie”), kalendarz z dniami wolnymi firmy, podgląd wniosku (dni, saldo po akceptacji, limity, kolizje, kto ma wtedy urlop), składanie, wycofywanie, prośba o anulowanie, decyzje i uwagi przełożonego na liście |
+| `admin-wnioski.html` | ✅ do rozpatrzenia (z prośbami o anulowanie), zatwierdzone / odrzucone / anulowane / wszystkie z wyborem roku, zatwierdzanie, odrzucanie z powodem, zgoda lub odmowa anulowania, anulowanie zatwierdzonego urlopu z powodem, ostrzeżenia o kolizjach (zastępca, inni nieobecni, termin w przeszłości) |
+| menu „Wnioski” (wszystkie strony) | ✅ licznik wniosków czekających na decyzję zalogowanej osoby (`pending_count` w `/api/me`) |
 
 **Decyzje podjęte w trakcie (zmiany względem pierwotnego planu):**
 
@@ -49,10 +50,16 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 - Testy bez Mailpit na razie — bez SMTP API zwraca link (`smtp_missing`), co wystarcza; Mailpit dojdzie przy e-mailach z decyzją (krok 6).
 - **Wnioski na dowolne daty** (także wstecz), ale tylko na rok poprzedni, bieżący albo następny i w obrębie jednego roku. Przy dacie w przeszłości panel tylko ostrzega; przełożony i tak zatwierdza.
 - Wycofanie: wniosek czekający → `cancelled` od razu; zatwierdzony, który się jeszcze nie zaczął → `cancel_requested` (do decyzji przełożonego urlop nadal się liczy); zatwierdzony, który już trwa albo minął → tylko przez przełożonego.
-- **Zaległy a kolejne lata:** wniosek z puli sprawdzany jest „w najgorszym wypadku” (`leave.safeLeft` — czekające wnioski z wcześniejszych lat liczone jak zatwierdzone). Wniosek na rok Y nie przejdzie, jeśli przez niego w którymś kolejnym roku z ustawioną pulą zabrakłoby dni na urlop już zatwierdzony lub czekający (rok już wcześniej na minusie nie blokuje wniosków, które go nie pogarszają). Panel liczy podgląd z tego samego salda (`available` w `/api/me/balance`). **Krok 6: zatwierdzanie musi robić to samo sprawdzenie w transakcji.**
+- **Zaległy a kolejne lata:** wniosek z puli sprawdzany jest „w najgorszym wypadku” (`leave.safeLeft` — czekające wnioski z wcześniejszych lat liczone jak zatwierdzone). Wniosek na rok Y nie przejdzie, jeśli przez niego w którymś kolejnym roku z ustawioną pulą zabrakłoby dni na urlop już zatwierdzony lub czekający (rok już wcześniej na minusie nie blokuje wniosków, które go nie pogarszają). Panel liczy podgląd z tego samego salda (`available` w `/api/me/balance`). Zatwierdzanie (krok 6) też sprawdza pulę w transakcji (rok wniosku i kolejne), ale liczy **tak, jakby zatwierdzono tylko ten wniosek** (`leave.leftWith` — zatwierdzone + ten jeden): inne czekające go nie blokują, bo każdy przejdzie to samo sprawdzenie przy swoim zatwierdzeniu. Np. po zmniejszeniu wymiaru przez admina zatwierdzenie, które nie mieści się w puli, jest blokowane z komunikatem; odrzucić można.
 - Limity „na żądanie” / opieka / siła wyższa liczą wnioski `pending` + `approved` + `cancel_requested`. „Na żądanie” zmniejsza też pulę wypoczynkowego.
 - „Kto ma wtedy urlop” (ustawienie `show_absent`): tylko zatwierdzone urlopy aktywnych osób, samo imię, nazwisko i termin — bez rodzaju urlopu i uwag.
 - E-maile „Nowy wniosek” i „Prośba o anulowanie” przeniesione do kroku 6 — razem ze stroną akceptacji, do której mają prowadzić.
+- **Kto zatwierdza (krok 6):** przy ustawieniu „Przełożony” — aktywny przełożony z pola „Przełożony” (rola Przełożony/Administrator), a gdy go nie ma — wszyscy aktywni administratorzy; przy „Każdy administrator” — administratorzy. E-mail idzie tylko do tych osób. **Administrator może rozpatrzyć każdy wniosek oprócz własnego** (np. gdy przełożony jest na urlopie) — na liście widzi „czeka na: …”. Własny wniosek admina trafia do innych adminów; **jedyny administrator zatwierdza sam** (bez e-maila do siebie, w logu `self: true`). Przełożony widzi tylko wnioski osób, które do niego trafiają.
+- Decyzje: odrzucenie, odmowa anulowania i anulowanie zatwierdzonego urlopu przez przełożonego (także trwającego) — **z obowiązkowym powodem** w e-mailu; zgoda na prośbę pracownika o anulowanie — bez powodu. Czekającego wniosku przełożony nie „anuluje”, tylko odrzuca.
+- E-mail z decyzją: przy zatwierdzeniu załącznik `urlop.ics` (całodniowe wydarzenie), przy anulowaniu `.ics` z `METHOD:CANCEL`, tym samym UID i wyższym `SEQUENCE`. Oba z `ORGANIZER` (adres nadawcy z Ustawień) i `ATTENDEE` (pracownik) — bez tego Outlook/Gmail nie usuwają wydarzenia przy CANCEL. Treść i `.ics` kasowane z kolejki po wysłaniu (migracja `004_mail_ics.sql`). Warto raz sprawdzić na prawdziwym Outlooku, czy anulowanie usuwa urlop z kalendarza.
+- Pracownik wycofuje czekający wniosek → przełożony dostaje krótki e-mail „Wniosek wycofany” (żeby link z „Nowy wniosek” nie prowadził donikąd bez wyjaśnienia).
+- Błąd przy przygotowaniu e-maila nie psuje udanej decyzji ani wniosku (zapis już jest) — tylko wpis w logu serwera.
+- Daty `created_at` / `decided_at` są w bazie w UTC (`datetime('now')`); strony pokazują je jako datę lokalną (`localDate` w `js/ui.js`).
 
 **Jak to było testowane:** każdy krok sprawdzony w kontenerze Docker (`NODE_ENV=production`) skryptami curl/Python, e-maile przez testowy serwer Mailpit; kalendarz dat w jsdom. Dwa przeglądy kodu (`/code-review`) — wszystkie uwagi poprawione. **Od kroku 4 testy są w repozytorium** (`test/`, `node --test`): każdy plik uruchamia prawdziwy serwer z pustą bazą w katalogu tymczasowym i przygotowuje dane bezpośrednio w SQLite. Uruchomienie (bez Node.js na komputerze): `docker compose -f docker-compose.test.yml up --build --exit-code-from tests`. Nowa logika = nowe testy w `test/`.
 
@@ -107,8 +114,8 @@ urlopy/
 │  ├─ audit.js             ← log audytowy
 │  ├─ bootstrap.js         ← pierwszy admin z ADMIN_EMAIL
 │  ├─ jobs.js              ← ⬜ cron (krok 8)
-│  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  requests.js (API pracownika)
-├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql
+│  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  requests.js (API pracownika)  approvals.js (akceptacja)
+├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql  004_mail_ics.sql
 ├─ test/                   ← node --test: helpers.js (serwer + baza testowa), auth, leave, admin-users
 ├─ Dockerfile              ← etapy: deps → test (tylko testy) → obraz docelowy
 ├─ docker-compose.yml  docker-compose.test.yml  .env.example  .gitattributes
@@ -220,9 +227,10 @@ Adresy i dane serwera wpisujesz w **Ustawienia → Poczta wychodząca** (zapis d
 | Reset hasła | pracownik | link ważny 1 godzinę, jednorazowy (prośba samodzielna albo od admina) | ✅ |
 | Hasło zmienione | pracownik | informacja + „jeśli to nie Ty, skontaktuj się z administratorem” | ✅ (dodane) |
 | Test poczty | wskazany adres | z Ustawień | ✅ |
-| Nowy wniosek | przełożony / admini | termin, dni, zastępca, przyciski do panelu | ⬜ krok 6 |
-| Decyzja | pracownik | zatwierdzony / odrzucony z powodem, załącznik `.ics` | ⬜ krok 6 |
-| Prośba o anulowanie | przełożony | dot. zatwierdzonego urlopu w przyszłości | ⬜ krok 6 |
+| Nowy wniosek | przełożony / admini | termin, dni, pula po akceptacji, zastępca, uwagi, przycisk do „Wnioski” | ✅ |
+| Decyzja | pracownik | zatwierdzony (`.ics`) / odrzucony z powodem / anulowany przez przełożonego z powodem (`.ics` CANCEL) / zgoda na anulowanie (`.ics` CANCEL) / odmowa anulowania z powodem | ✅ |
+| Prośba o anulowanie | przełożony | dot. zatwierdzonego urlopu w przyszłości | ✅ |
+| Wniosek wycofany | przełożony | pracownik wycofał czekający wniosek — nic nie trzeba robić | ✅ (dodane) |
 | Przypomnienie | pracownik | 1 lipca: niewykorzystany zaległy urlop | ⬜ krok 8 |
 | Zestawienie | wszyscy / admini | poniedziałek 7:00, kto jest nieobecny w tygodniu | ⬜ krok 8 |
 
@@ -249,9 +257,13 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ GET  /api/calendar?from=&to=           → { daysOff, showAbsent, absent } (święta liczy przeglądarka z holidays.js; zakres ≤ 3 lata)
 ✅ GET  /api/people                       → aktywne osoby (bez mnie) do wyboru zastępcy
 
-⬜ GET  /api/admin/requests?status=pending                                                       (6)
-⬜ POST /api/admin/requests/:id/approve                                                          (6)
-⬜ POST /api/admin/requests/:id/reject    { reason }                                             (6)
+✅ GET  /api/admin/requests?filter=pending|approved|rejected|cancelled|all&year=   (przełożony, admin)
+        → { requests: [... z left, overlaps, substitute_away, routed_to, mine], pending_count, today }
+✅ POST /api/admin/requests/:id/approve                     czekający → zatwierdzony (sprawdza pulę)
+✅ POST /api/admin/requests/:id/reject    { reason }        czekający → odrzucony
+✅ POST /api/admin/requests/:id/cancel    { reason? }       prośba o anulowanie → anulowany; zatwierdzony → anulowany (powód wymagany)
+✅ POST /api/admin/requests/:id/keep      { reason }        prośba o anulowanie → nadal zatwierdzony
+   (cudzy / niedostępny wniosek = 404; zmieniony stan = 409)
 ✅ GET  /api/admin/users?year=            → lista z saldem (balance) na rok
 ✅ POST /api/admin/invitations            { email, first_name, last_name, role, days, carry, year }
 ✅ POST /api/admin/invitations/:id/resend
@@ -309,10 +321,11 @@ Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlo
    Zrobione: okno edycji zapisuje wymiar i ręczny zaległy (`PUT /api/admin/allowances/…`, także dla roku bez wymiaru) oraz rolę, konto aktywne i nowe pole „Przełożony” (`PATCH /api/admin/users/:id`); „Przenieś wymiary z poprzedniego roku” (`POST /api/admin/allowances/copy`). Wyłączenie konta usuwa jego sesje; przełożony bez roli lub z wyłączonym kontem → podwładni bez przełożonego (ostrzeżenie); admin nie zmienia sam sobie roli ani nie wyłącza swojego konta; zawsze zostaje aktywny admin. Lista pokazuje przełożonego przy roli.
 5. ✅ **Panel pracownika: saldo, kalendarz, składanie i wycofywanie wniosków.**
    Zrobione: `routes/requests.js` + walidacja w `leave.js` (dni liczy serwer z `holidays.js` i `company_days_off`, kolizje, saldo, limity — w jednej transakcji), `panel.html` na prawdziwym API (saldo bieżącego roku, saldo innego roku doczytywane przy wyborze terminu, lista zastępców, kto ma wtedy urlop, wycofanie i prośba o anulowanie). Sprawdzone testami API i testem dymnym strony w jsdom. Do kroku 6: e-maile do przełożonego, decyzja o `cancel_requested`, wnioski `pending`, których termin minął.
-6. ⬜ Akceptacja wniosków, e-maile z decyzją, wykrywanie kolizji.
+6. ✅ **Akceptacja wniosków, e-maile z decyzją, wykrywanie kolizji.**
+   Zrobione: `src/approvals.js` (kto zatwierdza, kto może decydować, e-maile, decyzje w transakcji z kontrolą puli), `routes/approvals.js`, `admin-wnioski.html` na prawdziwym API, licznik w menu, e-maile do przełożonego (nowy wniosek, prośba o anulowanie) i do pracownika (decyzja, `.ics`). Sprawdzone testami API, testem dymnym stron w jsdom i prawdziwą wysyłką przez Mailpit (załącznik `.ics`). Wnioski czekające, których termin minął, zostają do decyzji (z ostrzeżeniem na karcie).
 7. ⬜ Dni wolne w firmie, przeliczanie wniosków, eksport CSV.
 8. ⬜ Cron: przypomnienia i zestawienie tygodniowe, log audytowy (zapis zdarzeń już działa — brak podglądu), kopie zapasowe.
-9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 46 testów — logowanie i ochrona API, saldo i zaległy, trasy kroków 4 i 5. Kolejne kroki dopisują swoje testy.
+9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 63 testy — logowanie i ochrona API, saldo i zaległy, trasy kroków 4–6 (e-maile sprawdzane w kolejce `mail_queue`). Kolejne kroki dopisują swoje testy.
 
 Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ===== */` zastąpić wywołaniem `fetch` z komentarza obok.
 

@@ -29,6 +29,12 @@
     return data;
   };
 
+  /** Licznik przy „Wnioski”: ile wniosków czeka na decyzję zalogowanej osoby (0 = ukryty) */
+  window.setNavCount = n => {
+    const el = document.getElementById('nav-count');
+    if (el) { el.textContent = n || ''; el.hidden = !n; }
+  };
+
   window.meReady = api('/api/me').then(me => {
     csrf = me.csrf;
     window.ME = me;
@@ -37,6 +43,7 @@
     document.querySelectorAll('.user-name').forEach(e => (e.textContent = name));
     document.querySelectorAll('.avatar').forEach(e => (e.textContent = initials));
     navLinks.forEach(a => (a.hidden = !ROLE_LINKS[a.getAttribute('href')].includes(me.role)));
+    setNavCount(me.pending_count);
     return me;
   });
 })();

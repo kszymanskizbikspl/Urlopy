@@ -12,6 +12,12 @@
 
   // Daty w aplikacji: dd/mm/rrrr. W kodzie i w API zawsze rrrr-mm-dd.
   window.fmtDate = s => { const [y, m, d] = s.slice(0, 10).split('-'); return `${d}/${m}/${y}`; };
+  /** Znacznik czasu z bazy (SQLite datetime('now') = UTC, „rrrr-mm-dd gg:mm:ss”) → data lokalna rrrr-mm-dd */
+  window.localDate = s => {
+    const d = new Date(String(s).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z'));
+    if (isNaN(d)) return String(s).slice(0, 10);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
   window.fmtRange = (a, b) => (!b || a === b ? fmtDate(a) : `${fmtDate(a)} – ${fmtDate(b)}`);
   /** „28/12/2026”, „28/12/2026 – 30/12/2026” */
   window.fmtNice = fmtRange;
