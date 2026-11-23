@@ -3,7 +3,9 @@
 const db = require('./db');
 const audit = require('./audit');
 const { createToken } = require('./tokens');
-const { APP_URL, ADMIN_EMAIL } = require('./config');
+const { appUrl } = require('./settings');
+const { ADMIN_EMAIL } = require('./config');
+const { fmtDateTime } = require('./mail-templates');
 
 function ensureFirstAdmin() {
   if (db.prepare("SELECT 1 FROM users WHERE role = 'admin' AND state = 'active'").get()) return;
@@ -38,8 +40,8 @@ function ensureFirstAdmin() {
     '',
     '================================================================',
     ` Pierwszy administrator: ${ADMIN_EMAIL}`,
-    ` Załóż konto (link ważny do ${new Date(expiresAt).toLocaleString('pl-PL')}):`,
-    ` ${APP_URL}/rejestracja.html?token=${token}`,
+    ` Załóż konto (link ważny do ${fmtDateTime(expiresAt)}):`,
+    ` ${appUrl()}/rejestracja.html?token=${token}`,
     '================================================================',
     '',
   ].join('\n'));

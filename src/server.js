@@ -9,6 +9,8 @@ const SqliteSessionStore = require('./session-store');
 const { loadUser, protectPages, sameOrigin } = require('./auth');
 const authRoutes = require('./routes/auth');
 const meRoutes = require('./routes/me');
+const adminRoutes = require('./routes/admin');
+const mail = require('./mail');
 const { ensureFirstAdmin } = require('./bootstrap');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -38,7 +40,7 @@ app.use(helmet({
 }));
 
 // Zasoby statyczne bez sesji (nie obciążają bazy)
-for (const dir of ['css', 'js', 'img']) {
+for (const dir of ['css', 'js', 'img', 'vendor']) {
   app.use(`/${dir}`, express.static(path.join(PUBLIC_DIR, dir), { index: false, maxAge: '1h' }));
 }
 
@@ -71,6 +73,7 @@ app.get('/', (req, res) => res.redirect(302, req.user ? '/panel.html' : '/login.
 app.use(authRoutes);
 
 app.use('/api/me', meRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nie znaleziono' }));
 
 // Strony HTML: chronione według ról, bez cache (po wylogowaniu „Wstecz” nie pokaże starej strony)
@@ -85,19 +88,22 @@ app.use((req, res) => res.status(404).type('text').send('Nie znaleziono'));
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err.status || err.statusCode || 500;
-  if (status >= 500) console.error(err);
-  const message = status >= 500 ? 'Błąd serwera' : err.expose ? err.message : 'Nieprawidłowe żądanie';
+  // expose = komunikat przeznaczony dla użytkownika (np. odpowiedź serwera SMTP przy teście poczty — kod 502)
+  if (status >= 500 && !err.expose) console.error(err);
+  const message = err.expose ? err.message : status >= 500 ? 'Błąd serwera' : 'Nieprawidłowe żądanie';
   if (req.path.startsWith('/api/')) return res.status(status).json({ error: message });
   res.status(status).type('text').send(message);
 });
 
 ensureFirstAdmin();
+mail.start();
 
 const server = app.listen(config.PORT, () => console.log(`[urlopy] nasłuch na porcie ${config.PORT}, baza: ${db.DB_FILE}`));
 
 // Zamknięcie przy `docker stop` — bez tego SQLite może zostawić niezapisany WAL
 function shutdown(signal) {
   console.log(`[urlopy] ${signal}, zamykanie`);
+  mail.stop();
   server.close(() => { db.close(); process.exit(0); });
   setTimeout(() => process.exit(1), 10_000).unref();
 }

@@ -11,7 +11,15 @@ if (SESSION_SECRET.length < 32) {
   SESSION_SECRET = crypto.randomBytes(32).toString('hex');
 }
 
-const APP_URL = (process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
+// Klucz do szyfrowania hasła SMTP w bazie. Zmiana klucza = trzeba ponownie wpisać hasło SMTP w Ustawieniach.
+// Brak klucza nie zatrzymuje aplikacji — tylko zapis hasła SMTP jest wtedy zablokowany (z komunikatem w Ustawieniach).
+let SETTINGS_KEY = process.env.SETTINGS_KEY || '';
+if (SETTINGS_KEY.length < 32) {
+  console.warn('[config] brak SETTINGS_KEY (min. 32 znaki, np. openssl rand -hex 32) — nie da się zapisać hasła SMTP');
+  SETTINGS_KEY = null;
+}
+
+const APP_URL =(process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 let APP_HOST;
 try { APP_HOST = new URL(APP_URL).host; } catch { throw new Error(`Nieprawidłowy APP_URL: ${APP_URL}`); }
 
@@ -26,4 +34,4 @@ const TRUST_PROXY = (() => {
   return /^\d+$/.test(v) ? Number(v) : v;
 })();
 
-module.exports = { PORT, isProd, SESSION_SECRET, APP_URL, APP_HOST, ADMIN_EMAIL, TRUST_PROXY };
+module.exports = { PORT, isProd, SESSION_SECRET, SETTINGS_KEY, APP_URL, APP_HOST, ADMIN_EMAIL, TRUST_PROXY };

@@ -4,6 +4,7 @@ const { rateLimit } = require('express-rate-limit');
 const db = require('../db');
 const audit = require('../audit');
 const { findToken, consumeToken } = require('../tokens');
+const { sendReset, notifyPasswordChanged } = require('../accounts');
 const {
   MAX_PASSWORD, hashPassword, verifyPassword, passwordProblem, getUser, startSession, safeNext,
 } = require('../auth');
@@ -130,6 +131,86 @@ router.post('/rejestracja', registerLimit, async (req, res, next) => {
     })();
     if (!ok) return res.redirect(303, '/rejestracja.html?expired=1');
 
+    await startSession(req, getUser.get(t.id), false);
+    res.redirect(303, '/panel.html');
+  } catch (err) { next(err); }
+});
+
+// ---------- reset hasła ----------
+// Prośba o link: zawsze ta sama odpowiedź (nie zdradza, czy konto istnieje).
+const resetLimitIp = rateLimit({
+  windowMs: WINDOW, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false,
+  handler: (req, res) => res.redirect(303, '/reset-hasla.html?error=limit'),
+});
+// Na jeden adres najwyżej 3 linki na godzinę — kolejne prośby udają sukces (bez zasypywania skrzynki)
+const resetLimitEmail = rateLimit({
+  windowMs: 3600e3, limit: 3, standardHeaders: false, legacyHeaders: false,
+  keyGenerator: req => 'reset:' + String((req.body && req.body.email) || '').trim().toLowerCase(),
+  handler: (req, res) => res.redirect(303, '/reset-hasla.html?sent=1'),
+});
+const findActive = db.prepare("SELECT id FROM users WHERE email = ? AND state = 'active'");
+
+router.post('/reset-hasla', resetLimitIp, resetLimitEmail, (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim();
+  const user = email && email.length <= 254 ? findActive.get(email) : null;
+  // Odpowiedź najpierw, praca potem: czas odpowiedzi nie zdradza, czy konto istnieje
+  res.redirect(303, '/reset-hasla.html?sent=1');
+  if (user) {
+    setImmediate(() => {
+      try {
+        // keepExisting: anonimowa prośba nie unieważnia wcześniejszych ważnych linków (np. od administratora)
+        sendReset(user.id, { keepExisting: true });
+        audit(user.id, 'reset_requested');
+      } catch (err) { console.error('[reset]', err); }
+    });
+  }
+});
+
+const invalidReset = t => !t || t.state !== 'active';
+
+// E-mail do ukrytego pola „username” — menedżer haseł zapisze nowe hasło pod właściwym kontem
+router.get('/api/reset', inviteLimit, (req, res) => {
+  const t = findToken(req.query.token, 'reset');
+  if (invalidReset(t)) return res.status(410).json({ error: 'Link wygasł albo został już użyty.' });
+  res.json({ email: t.email });
+});
+
+const setPassword = db.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND state = 'active'");
+
+// Osobny licznik: po przekroczeniu wraca na stronę resetu (nie rejestracji) z komunikatem o limicie
+const resetSetLimit = rateLimit({
+  ...linkLimitOpts,
+  limit: 100,
+  handler: (req, res) => res.redirect(303,
+    `/reset-hasla.html?token=${encodeURIComponent(String((req.body && req.body.token) || ''))}&error=limit`),
+});
+
+router.post('/reset-hasla/nowe', resetSetLimit, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const token = String(body.token || '');
+    const t = findToken(token, 'reset');
+    if (invalidReset(t)) return res.redirect(303, '/reset-hasla.html?expired=1');
+
+    const back = code => res.redirect(303, `/reset-hasla.html?token=${encodeURIComponent(token)}&error=${code}`);
+    const password = String(body.password || '');
+    if (password.length > MAX_PASSWORD) return back('password_long');
+    if (passwordProblem(password)) return back('password');
+    if (body.password_confirm !== undefined && body.password_confirm !== password) return back('mismatch');
+
+    const hash = await hashPassword(password);
+    const ok = db.transaction(() => {
+      if (!consumeToken(t.token_id)) return false;
+      if (setPassword.run(hash, t.id).changes !== 1) throw new Error('Konto nieaktywne');
+      // Inne tokeny resetu tej osoby też przestają działać
+      db.prepare("DELETE FROM tokens WHERE user_id = ? AND kind = 'reset' AND used_at IS NULL").run(t.id);
+      audit(t.id, 'password_reset');
+      return true;
+    })();
+    if (!ok) return res.redirect(303, '/reset-hasla.html?expired=1');
+
+    req.sessionStore.destroyUser(t.id);        // wylogowanie ze wszystkich urządzeń
+    notifyPasswordChanged(t.id);
     await startSession(req, getUser.get(t.id), false);
     res.redirect(303, '/panel.html');
   } catch (err) { next(err); }

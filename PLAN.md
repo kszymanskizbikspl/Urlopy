@@ -14,6 +14,8 @@ Aplikacja webowa do składania i akceptowania wniosków urlopowych, uruchamiana 
 | Bezpieczeństwo | `helmet`, `express-rate-limit`, token CSRF | ochrona logowania i formularzy |
 | Zadania cykliczne | `node-cron` | przypomnienia, zestawienie tygodniowe |
 
+**Daty:** wszędzie, gdzie widzi je użytkownik (strony, e-maile), format europejski `dd/mm/rrrr` (`fmtDate` / `fmtNice` w `js/ui.js`, `fmtDateTime` w `src/mail-templates.js`). Pola wyboru daty to `<input type="text" data-date>` z kalendarzem flatpickr (`public/vendor/flatpickr`, bez internetu) — pokazują `dd/mm/rrrr` niezależnie od języka przeglądarki. W kodzie, API i bazie daty zawsze jako `rrrr-mm-dd`.
+
 Frontend zostaje jako zwykłe pliki HTML/CSS/JS serwowane statycznie przez Express. Strony pobierają dane z `/api/...` (fetch), a logowanie, rejestracja i reset hasła to klasyczne formularze POST z przekierowaniem.
 
 ## 2. Struktura projektu
@@ -127,6 +129,7 @@ Zasady oparte na Kodeksie pracy; warto potwierdzić szczegóły (np. wymiar dla 
 - „Zapamiętaj mnie”: ciasteczko sesji `httpOnly; SameSite=Lax` (+ `Secure` automatycznie, gdy strona działa po HTTPS), `maxAge` 30 dni gdy zaznaczone, w przeciwnym razie ciasteczko sesyjne. Po zmianie hasła usunąć wszystkie sesje użytkownika.
 - Limit prób: 10 nieudanych logowań na 15 min na e-mail i 50 na IP (całe biuro może mieć jedno publiczne IP). Ten sam komunikat błędu niezależnie od tego, czy konto istnieje.
 - Hasło min. 8 znaków.
+- Reset hasła: na jeden adres najwyżej 3 linki na godzinę (kolejne prośby udają „wysłano”, żeby nie zasypać skrzynki). Anonimowa prośba nie unieważnia wcześniejszych ważnych linków. Skutek uboczny: ktoś może wyczerpać limit dla cudzego adresu — wtedy link wysyła administrator (Pracownicy → Edytuj → „Wyślij link do zmiany hasła”), bez limitu.
 - Tylko LAN, bez proxy: `trust proxy` wyłączone — serwer nie ufa nagłówkom `X-Forwarded-*`, więc nikt nie podrobi swojego IP, żeby obejść limit prób. Włącza się je zmienną `TRUST_PROXY` dopiero przy wystawieniu przez proxy (sekcja 8a).
 - Ochrona stron: middleware `requireLogin` przekierowuje na `/login.html`; strony `admin-*.html` i `/api/admin/*` tylko dla `manager`/`admin` (Ustawienia i Pracownicy tylko `admin`).
 
@@ -144,7 +147,7 @@ Adresy i dane serwera wpisujesz w **Ustawienia → Poczta wychodząca** (zapis d
 | Przypomnienie | pracownik | 1 lipca: niewykorzystany zaległy urlop |
 | Zestawienie | wszyscy / admini | poniedziałek 7:00, kto jest nieobecny w tygodniu |
 
-Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy błędzie SMTP), żeby awaria poczty nie blokowała zatwierdzania.
+Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy błędzie SMTP), żeby awaria poczty nie blokowała zatwierdzania. Zrobione jako `mail_queue`: ponowienia po 1, 5, 15, 60, 180, 360 min; po wysłaniu treść (z linkiem) jest kasowana; link resetu po godzinie nie jest już wysyłany. Gdy poczta nie jest ustawiona, admin dostaje link z zaproszenia / resetu do przekazania ręcznie.
 
 ## 7. API
 
@@ -153,6 +156,8 @@ POST /login · POST /logout
 POST /rejestracja                      { token, first_name, last_name, password }
 POST /reset-hasla                      { email }          → zawsze 303 ?sent=1
 POST /reset-hasla/nowe                 { token, password }
+GET  /api/invite?token=                → dane do strony rejestracji (e-mail, imię, wymiar, kto zaprosił); 410 = link nieważny
+GET  /api/reset?token=                 → { email } do pola username przy nowym haśle; 410 = link nieważny
 
 GET  /api/me
 GET  /api/me/balance?year=2026         → { allowance, carried, used, pending, left, onDemandUsed }
@@ -167,6 +172,7 @@ POST /api/admin/requests/:id/reject    { reason }
 GET  /api/admin/users?year=
 POST /api/admin/invitations            { email, first_name, last_name, role, days, carry }
 POST /api/admin/invitations/:id/resend
+POST /api/admin/users/:id/reset-password  → link do zmiany hasła wysłany przez admina
 PATCH /api/admin/users/:id             { role, state, manager_id }
 PUT  /api/admin/allowances/:userId/:year { days, carry_override }
 POST /api/admin/allowances/copy        { from, to }

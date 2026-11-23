@@ -200,8 +200,10 @@ tr.is-invited td { background: var(--muted-bg); }
 .dayoff + .dayoff { border-top: 1px solid var(--line-soft); }
 .dayoff .what { flex: 1 1 220px; display: flex; flex-direction: column; }
 .dayoff .what strong { color: var(--holiday); font-weight: 600; }
-.dayoff input[type="date"] { width: auto; }
 .dayoff input[type="text"] { flex: 1 1 220px; width: auto; }
+/* Pola daty dd/mm/rrrr (flatpickr, js/ui.js → datePickers) */
+.date-input { min-width: 9.5em; }
+.dayoff input.date-input { flex: 0 0 auto; width: 9.5em; } /* ta sama siła co input[type="text"] wyżej, więc wygrywa kolejność */
 .state-ok { color: var(--accent); font-size: 13px; }
 .state-bad { color: var(--holiday); font-size: 13px; }
 

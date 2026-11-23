@@ -123,7 +123,7 @@ class LeaveCalendar {
       for (const [iso, name] of this.o.extraOff) if (iso.startsWith(prefix)) free.push([iso, name]);
     }
     free.sort((a, b) => a[0].localeCompare(b[0]));
-    const fmt = iso => { const d = PL.parse(iso); return `${d.getDate()} ${PL_MONTHS_GEN[d.getMonth()]}`; };
+    const fmt = iso => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; }; // dd/mm/rrrr
     const chev = d => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`;
     this.el.innerHTML = `
       <div class="cal-bar">

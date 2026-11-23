@@ -7,6 +7,7 @@ const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
 
 const q = {
   dropUnused: db.prepare('DELETE FROM tokens WHERE user_id = ? AND kind = ? AND used_at IS NULL'),
+  dropExpired: db.prepare('DELETE FROM tokens WHERE user_id = ? AND kind = ? AND used_at IS NULL AND expires_at <= ?'),
   insert: db.prepare('INSERT INTO tokens (user_id, kind, token_hash, expires_at, created_by) VALUES (?, ?, ?, ?, ?)'),
   find: db.prepare(`SELECT t.id AS token_id, t.expires_at, t.created_by,
                            u.id, u.email, u.first_name, u.last_name, u.role, u.state
@@ -15,12 +16,15 @@ const q = {
   consume: db.prepare("UPDATE tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL"),
 };
 
-/** Nowy token; poprzednie niewykorzystane tokeny tego rodzaju dla użytkownika przestają działać. */
-function createToken(userId, kind, createdBy = null) {
+/** Nowy token. Domyślnie poprzednie niewykorzystane tokeny tego rodzaju przestają działać;
+    keepExisting — zostają ważne (usuwane są tylko przeterminowane), np. przy anonimowej prośbie o reset. */
+function createToken(userId, kind, createdBy = null, { keepExisting = false } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + TTL[kind]).toISOString();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + TTL[kind]).toISOString();
   db.transaction(() => {
-    q.dropUnused.run(userId, kind);
+    if (keepExisting) q.dropExpired.run(userId, kind, now.toISOString());
+    else q.dropUnused.run(userId, kind);
     q.insert.run(userId, kind, sha256(token), expiresAt, createdBy);
   })();
   return { token, expiresAt };
@@ -36,4 +40,4 @@ function findToken(token, kind) {
 /** Oznacza token jako użyty; false, jeśli ktoś zdążył go użyć wcześniej. */
 const consumeToken = tokenId => q.consume.run(tokenId).changes === 1;
 
-module.exports = { createToken, findToken, consumeToken };
+module.exports = { createToken, findToken, consumeToken, TTL };

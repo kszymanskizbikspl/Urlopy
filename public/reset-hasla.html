@@ -20,6 +20,7 @@
       <label for="email">Adres e-mail</label>
       <input id="email" name="email" type="email" autocomplete="username" required autofocus>
     </div>
+    <p class="msg msg-err" id="req-error" role="alert" hidden></p>
     <button class="btn btn-block" type="submit">Wyślij link</button>
     <p class="msg msg-ok" id="req-sent" role="status" hidden>Jeśli konto o tym adresie istnieje, link już jest w drodze. Zajrzyj też do spamu.</p>
   </form>
@@ -27,8 +28,8 @@
   <!-- Krok 2: /reset-hasla.html?token=XXXX — link z e-maila -->
   <form class="solo-card auth-form" method="post" action="/reset-hasla/nowe" id="step-set" hidden>
     <input type="hidden" name="token" id="token">
-    <!-- ukryte pole username pomaga menedżerowi haseł podpiąć nowe hasło pod właściwe konto (serwer wstawia e-mail) -->
-    <input type="email" name="email" autocomplete="username" value="" hidden>
+    <!-- ukryte pole username pomaga menedżerowi haseł podpiąć nowe hasło pod właściwe konto (e-mail z GET /api/reset) -->
+    <input type="email" name="email" id="set-email" autocomplete="username" value="" hidden>
     <div style="display: flex; flex-direction: column; gap: 6px">
       <h1 style="font-size: 28px">Ustaw nowe hasło</h1>
       <p class="muted">Po zapisaniu inne zalogowane urządzenia zostaną wylogowane.</p>
@@ -50,19 +51,42 @@
 </main>
 <script>
   const p = new URLSearchParams(location.search);
-  if (p.has('token')) {
-    document.getElementById('step-request').hidden = true;
-    document.getElementById('step-set').hidden = false;
-    document.getElementById('token').value = p.get('token');
-  }
-  if (p.has('sent')) document.getElementById('req-sent').hidden = false;
+  const $ = id => document.getElementById(id);
+  const ERR = {
+    password: 'Hasło musi mieć co najmniej 8 znaków.',
+    password_long: 'Hasło może mieć najwyżej 256 znaków.',
+    mismatch: 'Hasła się różnią.',
+    limit: 'Zbyt wiele prób. Spróbuj ponownie za kilka minut.',
+  };
+  const show = (id, t) => { $(id).textContent = t; $(id).hidden = !t; };
+  const token = p.get('token');
 
-  document.getElementById('step-set').addEventListener('submit', e => {
-    const a = document.getElementById('pw').value, b = document.getElementById('pw2').value;
-    const err = document.getElementById('set-error');
-    err.textContent = a.length < 8 ? 'Hasło musi mieć co najmniej 8 znaków.' : a !== b ? 'Hasła się różnią.' : '';
-    err.hidden = !err.textContent;
-    if (err.textContent) e.preventDefault();
+  function askForNewLink() {
+    $('step-set').hidden = true;
+    $('step-request').hidden = false;
+    show('req-error', 'Link wygasł albo został już użyty. Poproś o nowy poniżej.');
+  }
+
+  if (p.has('expired')) askForNewLink();
+  else if (token) {
+    $('step-request').hidden = true;
+    $('step-set').hidden = false;
+    $('token').value = token;
+    if (ERR[p.get('error')]) show('set-error', ERR[p.get('error')]);
+    fetch('/api/reset?token=' + encodeURIComponent(token), { headers: { Accept: 'application/json' } })
+      .then(r => {
+        if (r.ok) return r.json().then(d => ($('set-email').value = d.email));
+        if (r.status === 410) askForNewLink();
+        else if (r.status === 429) show('set-error', ERR.limit);
+      })
+      .catch(() => {}); // bez połączenia: formularz i tak działa, serwer sprawdzi link przy zapisie
+  } else if (p.get('error') === 'limit') show('req-error', ERR.limit);
+  if (p.has('sent')) $('req-sent').hidden = false;
+
+  $('step-set').addEventListener('submit', e => {
+    const a = $('pw').value, b = $('pw2').value;
+    show('set-error', a.length < 8 ? ERR.password : a.length > 256 ? ERR.password_long : a !== b ? ERR.mismatch : '');
+    if ($('set-error').textContent) e.preventDefault();
   });
 </script>
 </body>

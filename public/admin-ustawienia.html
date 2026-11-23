@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ustawienia · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="vendor/flatpickr/flatpickr.min.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -56,7 +57,7 @@
       <div class="field"><label for="s-pass">Hasło</label><input id="s-pass" name="smtp_password" type="password" autocomplete="new-password" placeholder="zapisane, wpisz aby zmienić"></div>
       <div class="field"><label for="s-from">Adres nadawcy</label><input id="s-from" name="smtp_from" type="email" required></div>
       <div class="field"><label for="s-name">Nazwa nadawcy</label><input id="s-name" name="smtp_from_name" value="Urlopy ZBIKS"></div>
-      <div class="field"><label for="s-url">Adres aplikacji w linkach z e-maili</label><input id="s-url" name="app_url" type="url" placeholder="https://urlopy.zbiks.pl" required></div>
+      <div class="field"><label for="s-url">Adres aplikacji w linkach z e-maili</label><input id="s-url" name="app_url" type="url" placeholder="http://192.168.88.X:1003"><span class="hint">Puste = adres z pliku .env (APP_URL).</span></div>
     </div>
     <p class="msg" id="smtp-msg" role="status" hidden></p>
     <div class="card-foot">
@@ -106,42 +107,106 @@
 </main>
 
 <script src="js/holidays.js"></script>
+<script src="vendor/flatpickr/flatpickr.min.js"></script>
+<script src="vendor/flatpickr/pl.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/session.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const WD = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
 
-/* ===== MOCK — docelowo GET/PUT /api/admin/days-off/:year ===== */
+/* ===== MOCK — docelowo GET/PUT /api/admin/days-off/:year (krok 7) ===== */
 const daysOff = {
   2026: { replacements: { '2026-08-15': '2026-11-10', '2026-12-26': '2026-12-31' }, extra: [] },
   2027: { replacements: {}, extra: [] },
 };
 /* ===== koniec MOCK ===== */
 
-// --- poczta
+// --- poczta i zasady: GET/PUT /api/admin/settings
 const PORTS = { starttls: 587, tls: 465, none: 25 };
+const SMTP_FIELDS = ['smtp_host', 'smtp_secure', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_from', 'smtp_from_name', 'app_url'];
+const RULE_FLAGS = ['show_absent', 'weekly_digest', 'carry_reminder'];
 $('s-sec').addEventListener('change', e => ($('s-port').value = PORTS[e.target.value]));
-function smtpMsg(kind, t) { const m = $('smtp-msg'); m.className = 'msg msg-' + kind; m.textContent = t; m.hidden = false; }
-$('smtp-test').addEventListener('click', () => {
-  const to = $('s-test').value.trim();
+function showMsg(id, kind, t) { const m = $(id); m.className = 'msg msg-' + kind; m.textContent = t; m.hidden = false; }
+const smtpMsg = (kind, t) => showMsg('smtp-msg', kind, t);
+
+function fillSmtp(s) {
+  const f = $('smtp-form').elements;
+  SMTP_FIELDS.forEach(n => { if (n !== 'smtp_password') f[n].value = s[n] ?? ''; });
+  f.smtp_password.value = '';
+  f.smtp_password.placeholder = s.smtp_password_set ? 'zapisane, wpisz aby zmienić' : '';
+  f.app_url.placeholder = s.app_url_default || '';
+}
+function fillRules(s) {
+  const f = $('rules-form').elements;
+  f.default_days.value = String(s.default_days);
+  f.approver.value = s.approver;
+  RULE_FLAGS.forEach(n => (f[n].checked = !!s[n]));
+}
+/** Pola poczty z formularza; puste hasło = bez zmiany */
+function smtpData() {
+  const f = $('smtp-form').elements, out = {};
+  SMTP_FIELDS.forEach(n => (out[n] = f[n].value));
+  if (!out.smtp_password) delete out.smtp_password;
+  return out;
+}
+
+meReady
+  .then(() => api('/api/admin/settings'))
+  .then(s => {
+    fillSmtp(s); fillRules(s);
+    if (s.settings_key_missing) smtpMsg('warn', 'Brak SETTINGS_KEY w pliku .env na serwerze — hasła SMTP nie da się zapisać. Serwer bez logowania (bez hasła) zadziała.');
+  })
+  .catch(err => smtpMsg('err', 'Nie udało się wczytać ustawień: ' + err.message));
+
+$('smtp-test').addEventListener('click', async () => {
+  const to = $('s-test').value.trim(), btn = $('smtp-test');
   if (!to) return smtpMsg('err', 'Wpisz adres, na który wysłać test.');
-  smtpMsg('warn', 'Wysyłam…');
-  // Docelowo: POST /api/admin/settings/smtp-test { to } — błąd z serwera pokazać w całości (np. „535 Authentication failed”)
-  setTimeout(() => smtpMsg('ok', `Wysłano e-mail testowy na ${to}.`), 600);
+  smtpMsg('warn', 'Wysyłam… (do 30 sekund, jeśli serwer nie odpowiada)');
+  btn.disabled = true;
+  try {
+    // Test z tym, co jest w formularzu — także przed zapisaniem
+    await api('/api/admin/settings/smtp-test', { method: 'POST', body: { to, ...smtpData() } });
+    smtpMsg('ok', `Wysłano e-mail testowy na ${to}. Sprawdź skrzynkę (także spam). Pamiętaj, żeby zapisać ustawienia.`);
+  } catch (err) {
+    smtpMsg('err', 'Nie udało się wysłać: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 });
-$('smtp-form').addEventListener('submit', e => { e.preventDefault(); /* PUT /api/admin/settings */ smtpMsg('ok', 'Zapisano ustawienia poczty.'); });
-$('rules-form').addEventListener('submit', e => { e.preventDefault(); /* PUT /api/admin/settings */ $('rules-msg').hidden = false; });
+$('smtp-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    fillSmtp(await api('/api/admin/settings', { method: 'PUT', body: smtpData() }));
+    smtpMsg('ok', 'Zapisano ustawienia poczty. Wiadomości czekające w kolejce zostaną wysłane.');
+  } catch (err) {
+    smtpMsg('err', err.message);
+  }
+});
+$('rules-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const body = { default_days: f.default_days.value, approver: f.approver.value };
+  RULE_FLAGS.forEach(n => (body[n] = f[n].checked));
+  try {
+    fillRules(await api('/api/admin/settings', { method: 'PUT', body }));
+    showMsg('rules-msg', 'ok', 'Zapisano zasady.');
+  } catch (err) {
+    showMsg('rules-msg', 'err', err.message);
+  }
+});
 
 // --- dni wolne
 function renderOff() {
   const y = +$('o-year').value, cfg = daysOff[y];
   const sats = PL.saturdayHolidays(y);
+  // stare kalendarze (flatpickr) usuwamy przed podmianą pól
+  $('off-form').querySelectorAll('input[data-date]').forEach(el => el._flatpickr && el._flatpickr.destroy());
   $('sat-list').innerHTML = sats.length ? sats.map(s => `
     <div class="dayoff">
       <div class="what"><strong>${fmtNice(s.date)}, sobota</strong><span class="small muted">${s.name}</span></div>
       <label for="sat-${s.date}" class="small muted">wolne w zamian</label>
-      <input type="date" id="sat-${s.date}" data-sat="${s.date}" value="${cfg.replacements[s.date] || ''}" min="${y}-01-01" max="${y}-12-31">
+      <input type="text" data-date id="sat-${s.date}" data-sat="${s.date}" value="${cfg.replacements[s.date] || ''}" min="${y}-01-01" max="${y}-12-31">
       <span data-sat-info="${s.date}"></span>
     </div>`).join('') : `<div class="dayoff muted">W ${y} roku żadne święto nie wypada w sobotę.</div>`;
   sats.forEach(s => validateSat(s.date));
@@ -149,11 +214,12 @@ function renderOff() {
   $('extra-list').innerHTML = cfg.extra.map((x, i) => `
     <div class="dayoff">
       <label for="ex-${i}" class="sr-only">Data</label>
-      <input type="date" id="ex-${i}" data-extra-date="${i}" value="${x.date}" min="${y}-01-01" max="${y}-12-31">
+      <input type="text" data-date id="ex-${i}" data-extra-date="${i}" value="${x.date}" min="${y}-01-01" max="${y}-12-31">
       <label for="exn-${i}" class="sr-only">Opis</label>
       <input type="text" id="exn-${i}" data-extra-name="${i}" value="${esc(x.name)}" placeholder="Np. dzień wolny za pracę w święto">
       <button type="button" class="btn btn-danger btn-sm" data-extra-del="${i}">Usuń</button>
     </div>`).join('') || '<div class="dayoff muted">Brak innych dni wolnych.</div>';
+  datePickers($('off-form'));
 }
 function validateSat(date) {
   const v = document.querySelector(`[data-sat="${date}"]`).value, info = document.querySelector(`[data-sat-info="${date}"]`);

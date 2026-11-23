@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mój urlop · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="vendor/flatpickr/flatpickr.min.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -73,8 +74,8 @@
     <form class="card col-side" id="req-form" aria-labelledby="form-h">
       <h2 class="card-title" id="form-h">Nowy wniosek</h2>
       <div class="grid-dates">
-        <div class="field"><label for="from">Od</label><input type="date" id="from" name="date_from" required></div>
-        <div class="field"><label for="to">Do</label><input type="date" id="to" name="date_to" required></div>
+        <div class="field"><label for="from">Od</label><input type="text" data-date id="from" name="date_from" required></div>
+        <div class="field"><label for="to">Do</label><input type="text" data-date id="to" name="date_to" required></div>
       </div>
       <div class="field">
         <label for="type">Rodzaj urlopu</label>
@@ -118,6 +119,8 @@
 
 <script src="js/holidays.js"></script>
 <script src="js/calendar.js"></script>
+<script src="vendor/flatpickr/flatpickr.min.js"></script>
+<script src="vendor/flatpickr/pl.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/session.js"></script>
 <script>
@@ -193,7 +196,7 @@ const calEvents = () => data.requests
 const cal = new LeaveCalendar($('cal'), {
   months: 2, events: calEvents(), extraOff, minDate: today,
   heading: '<h2 class="card-title" id="cal-h">Wybierz termin</h2><p class="small muted">Kliknij pierwszy, potem ostatni dzień urlopu.</p>',
-  onSelect(f, t) { $('from').value = f || ''; $('to').value = t || ''; update(); },
+  onSelect(f, t) { setDateValue($('from'), f); setDateValue($('to'), t); update(); },
 });
 
 function show(kind, text) { const m = $('msg'); m.className = 'msg msg-' + kind; m.textContent = text; m.hidden = !text; }
@@ -229,7 +232,7 @@ $('req-form').addEventListener('submit', async e => {
   // Docelowo: await fetch('/api/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) });
   const days = PL.countWorkingDays(body.date_from, body.date_to, extraOff);
   data.requests.unshift({ id: Date.now(), from: body.date_from, to: body.date_to, days, type: body.type, status: 'pending' });
-  e.target.reset(); cal.clear(); cal.setEvents(calEvents());
+  e.target.reset(); setDateValue($('from'), ''); setDateValue($('to'), ''); cal.clear(); cal.setEvents(calEvents());
   renderBalance(); renderRequests(); update();
   show('ok', 'Wniosek wysłany. Dostaniesz e-mail, gdy przełożony go rozpatrzy.');
 });

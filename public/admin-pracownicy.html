@@ -40,7 +40,7 @@
     </div>
     <div class="field">
       <label for="year">Rok</label>
-      <select id="year" style="min-width: 120px"><option>2025</option><option selected>2026</option><option>2027</option></select>
+      <select id="year" style="min-width: 120px"></select>
     </div>
   </div>
 
@@ -72,7 +72,7 @@
       </div>
       <div class="field"><label for="i-email">Służbowy e-mail</label><input id="i-email" type="email" required autocomplete="off" placeholder="imie.nazwisko@zbiks.pl"></div>
       <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
-        <legend class="label" style="padding: 0; margin-bottom: 8px">Wymiar urlopu w <span class="y">2026</span></legend>
+        <legend class="label" style="padding: 0; margin-bottom: 8px">Wymiar urlopu w <span id="inv-year"></span></legend>
         <div class="choice-row">
           <label class="choice"><input type="radio" name="dim" value="20">20 dni</label>
           <label class="choice"><input type="radio" name="dim" value="26" checked>26 dni</label>
@@ -121,34 +121,53 @@
 <script src="js/ui.js"></script>
 <script src="js/session.js"></script>
 <script>
-/* ===== MOCK — docelowo GET /api/admin/users?year= ===== */
 const ROLES = { employee: 'Pracownik', manager: 'Przełożony', admin: 'Administrator' };
-const users = [
-  { id: 1, first: 'Anna', last: 'Kowalska', email: 'a.kowalska@zbiks.pl', role: 'admin', state: 'active', y: { 2025: { days: 26, carryAuto: 2, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 4, used: 16, pending: 3 } } },
-  { id: 2, first: 'Piotr', last: 'Nowak', email: 'p.nowak@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 26, carryAuto: 0, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 2, used: 16, pending: 3 } } },
-  { id: 3, first: 'Marta', last: 'Wiśniewska', email: 'm.wisniewska@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 20, carryAuto: 0, used: 20, pending: 0 }, 2026: { days: 20, carryAuto: 0, used: 13, pending: 2 } } },
-  { id: 4, first: 'Tomasz', last: 'Zieliński', email: 't.zielinski@zbiks.pl', role: 'manager', state: 'active', y: { 2025: { days: 26, carryAuto: 3, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 3, carryOverride: 5, used: 16, pending: 1 } } },
-  { id: 5, first: 'Katarzyna', last: 'Lewandowska', email: 'k.lewandowska@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 26, carryAuto: 0, used: 23, pending: 0 }, 2026: { days: 26, carryAuto: 3, used: 20, pending: 3 } } },
-  { id: 6, first: 'Michał', last: 'Wójcik', email: 'michal.wojcik@zbiks.pl', role: 'employee', state: 'invited', invitedAt: '2026-11-20', y: { 2026: { days: 20, carryAuto: 0, used: 0, pending: 0 } } },
-];
-/* ===== koniec MOCK ===== */
-
 const $ = id => document.getElementById(id);
+let users = [];
 let editing = null;
+let defaultDays = 26;
 const year = () => +$('year').value;
+// Zaproszenie zawsze z wymiarem na bieżący rok albo późniejszy — nie na rok wybrany do przeglądania, jeśli miniony
+const inviteYear = () => Math.max(year(), new Date().getFullYear());
 const carryOf = a => a.carryOverride ?? a.carryAuto;
-const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const fullName = u => `${u.first} ${u.last}`.trim() || u.email;
+const localIso = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const editBtn = (u, a) => `<button type="button" class="btn btn-ghost btn-sm" data-edit="${u.id}" ${a ? '' : 'disabled'}>Edytuj</button>`;
+
+// Lata do wyboru: poprzedni, bieżący, następny
+(() => {
+  const y = new Date().getFullYear();
+  $('year').innerHTML = [y - 1, y, y + 1].map(v => `<option${v === y ? ' selected' : ''}>${v}</option>`).join('');
+})();
+
+/** GET /api/admin/users?year= — lista z saldem na wybrany rok */
+async function load() {
+  const y = year();
+  try {
+    const data = await api('/api/admin/users?year=' + y);
+    if (y !== year()) return; // w międzyczasie zmieniono rok
+    users = data.users.map(u => ({
+      id: u.id, first: u.first_name, last: u.last_name, email: u.email, role: u.role, state: u.state,
+      invitedAt: u.invited_at && localIso(u.invited_at), inviteExpired: u.invite_expired,
+      y: { [y]: u.balance },
+    }));
+    render();
+  } catch (err) {
+    toast('Nie udało się wczytać listy pracowników: ' + err.message, 0, 'err');
+  }
+}
 
 function render() {
   const y = year();
   document.querySelectorAll('.y').forEach(e => (e.textContent = y));
+  $('inv-year').textContent = inviteYear();
   $('no-year').hidden = !users.some(u => u.state !== 'invited' && !u.y[y]);
   $('rows').innerHTML = users.map(u => {
     const a = u.y[y];
-    const sub = u.state === 'invited' ? `<span class="invited">Zaproszony ${fmtNice(u.invitedAt)}, jeszcze nie założył konta</span>`
+    const sub = u.state === 'invited'
+      ? `<span class="invited">${u.invitedAt ? `Zaproszenie ${fmtNice(u.invitedAt)}` : 'Zaproszenie'}${u.inviteExpired ? ', link wygasł — wyślij ponownie' : ', konto jeszcze niezałożone'}</span>`
       : u.state === 'disabled' ? '<span>Konto wyłączone</span>' : `<span>${ROLES[u.role]}</span>`;
-    const who = `<td><div class="who"><strong>${esc(u.first)} ${esc(u.last)}</strong>${sub}</div></td>`;
+    const who = `<td><div class="who"><strong>${esc(fullName(u))}</strong>${sub}</div></td>`;
     const act = u.state === 'invited' ? `<button type="button" class="btn btn-ghost btn-sm" data-resend="${u.id}">Wyślij ponownie</button>` : editBtn(u, a);
     if (!a) return `<tr>${who}<td class="num muted" colspan="4">nie ustawiono</td><td>${act}</td></tr>`;
     const carry = carryOf(a), left = a.days + carry - a.used - a.pending;
@@ -157,41 +176,74 @@ function render() {
       <td class="num">${carry}${a.carryOverride != null ? ' <span class="small muted">ręcznie</span>' : ''}</td>
       <td class="num">${a.used}${a.pending ? ` + ${a.pending}` : ''}</td>
       <td class="num left">${left}</td><td>${act}</td></tr>`;
-  }).join('');
+  }).join('') || '<tr><td colspan="6" class="muted">Brak pracowników. Zaproś pierwszą osobę formularzem obok.</td></tr>';
 }
 
-function toast(t) { $('toast').textContent = t; $('toast').hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => ($('toast').hidden = true), 4000); }
+/** Komunikat nad listą. ms = 0 — zostaje, aż pojawi się następny (np. link do skopiowania). */
+function toast(t, ms = 4000, kind = 'ok') {
+  const el = $('toast');
+  el.className = 'msg msg-' + kind; el.textContent = t; el.hidden = false;
+  clearTimeout(toast.h);
+  if (ms) toast.h = setTimeout(() => (el.hidden = true), ms);
+  el.scrollIntoView({ block: 'nearest' });
+}
 
-$('year').addEventListener('change', render);
+/** Wynik wysyłki: e-mail w kolejce albo — gdy poczta nie jest ustawiona — link do przekazania ręcznie */
+function mailResult(r, okText) {
+  if (r.mail === 'queued') toast(okText);
+  else toast(`Poczta nie jest skonfigurowana (Ustawienia → Poczta wychodząca), więc e-mail nie wyszedł. Przekaż ten link osobiście: ${r.link}`, 0, 'warn');
+}
+
+function setDefaultDays() {
+  const r = document.querySelector(`#invite-form input[name="dim"][value="${defaultDays}"]`);
+  if (r) r.checked = true;
+}
+
+$('year').addEventListener('change', load);
 
 $('copy-year').addEventListener('click', () => {
-  const y = year();
-  // Docelowo: POST /api/admin/allowances/copy { from: y-1, to: y } — zaległy wylicza serwer
-  users.forEach(u => {
-    if (u.y[y]) return;
-    const prev = u.y[y - 1];
-    u.y[y] = { days: prev ? prev.days : 26, carryAuto: prev ? Math.max(0, prev.days + carryOf(prev) - prev.used - prev.pending) : 0, used: 0, pending: 0 };
-  });
-  render(); toast(`Ustawiono wymiar na ${y}. Zaległy urlop wyliczono z salda ${y - 1}.`);
+  // POST /api/admin/allowances/copy { from: y-1, to: y } — krok 4
+  toast('Przenoszenie wymiarów na nowy rok będzie dostępne w kroku 4.', 6000, 'warn');
 });
 
-$('invite-form').addEventListener('submit', e => {
+$('invite-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const u = { id: Date.now(), first: $('i-first').value.trim(), last: $('i-last').value.trim(), email: $('i-email').value.trim(),
-              role: $('i-role').value, state: 'invited', invitedAt: todayIso(), y: {} };
-  const carry = +$('i-carry').value || 0;
-  u.y[year()] = { days: +e.target.dim.value, carryAuto: 0, carryOverride: carry || null, used: 0, pending: 0 };
-  // Docelowo: POST /api/admin/invitations
-  users.push(u); e.target.reset(); render(); toast(`Zaproszenie wysłane na ${u.email}.`);
+  const f = e.target, btn = f.querySelector('button[type="submit"]');
+  const body = {
+    first_name: $('i-first').value, last_name: $('i-last').value, email: $('i-email').value.trim(),
+    role: $('i-role').value, days: +f.dim.value, carry: +$('i-carry').value || 0, year: inviteYear(),
+  };
+  btn.disabled = true;
+  try {
+    const r = await api('/api/admin/invitations', { method: 'POST', body });
+    f.reset(); setDefaultDays();
+    await load();
+    mailResult(r, `Zaproszenie wysłane na ${body.email}.`);
+  } catch (err) {
+    toast(err.message, 8000, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
-$('rows').addEventListener('click', e => {
+$('rows').addEventListener('click', async e => {
   const ed = e.target.closest('[data-edit]'), rs = e.target.closest('[data-resend]');
-  if (rs) { const u = users.find(x => x.id == rs.dataset.resend); u.invitedAt = todayIso(); render(); toast(`Wysłano ponownie zaproszenie na ${u.email}.`); }
+  if (rs) {
+    const u = users.find(x => x.id == rs.dataset.resend);
+    rs.disabled = true;
+    try {
+      const r = await api(`/api/admin/invitations/${u.id}/resend`, { method: 'POST' });
+      await load();
+      mailResult(r, `Wysłano ponownie zaproszenie na ${u.email}. Poprzedni link przestał działać.`);
+    } catch (err) {
+      toast(err.message, 8000, 'err'); rs.disabled = false;
+    }
+    return;
+  }
   if (!ed) return;
   editing = users.find(x => x.id == ed.dataset.edit);
   const a = editing.y[year()];
-  $('e-title').textContent = `${editing.first} ${editing.last}`;
+  $('e-title').textContent = fullName(editing);
   $('e-days').value = a.days;
   $('e-role').value = editing.role;
   $('e-override').checked = a.carryOverride != null;
@@ -202,20 +254,27 @@ $('rows').addEventListener('click', e => {
   $('edit-dlg').showModal();
 });
 $('e-override').addEventListener('change', e => { $('e-carry').disabled = !e.target.checked; if (!e.target.checked) $('e-carry').value = editing.y[year()].carryAuto; });
-$('e-reset').addEventListener('click', () => toast(`Wysłano link do zmiany hasła na ${editing.email}.`));
+$('e-reset').addEventListener('click', async () => {
+  const u = editing;
+  $('edit-dlg').close('cancel');
+  try {
+    mailResult(await api(`/api/admin/users/${u.id}/reset-password`, { method: 'POST' }), `Wysłano link do zmiany hasła na ${u.email}. Link jest ważny godzinę.`);
+  } catch (err) {
+    toast(err.message, 8000, 'err');
+  }
+});
 $('edit-dlg').addEventListener('close', () => {
-  if ($('edit-dlg').returnValue !== 'ok' || !editing) return;
-  const a = editing.y[year()];
-  a.days = +$('e-days').value;
-  a.carryOverride = $('e-override').checked ? +$('e-carry').value : null;
-  editing.role = $('e-role').value;
-  editing.state = $('e-active').checked ? 'active' : 'disabled';
-  // Docelowo: PATCH /api/admin/users/:id oraz PUT /api/admin/allowances/:id/:year
-  render(); toast(`Zapisano zmiany: ${editing.first} ${editing.last}.`);
+  if ($('edit-dlg').returnValue === 'ok' && editing) {
+    // PATCH /api/admin/users/:id oraz PUT /api/admin/allowances/:id/:year — krok 4
+    toast('Zapisywanie zmian (wymiar, zaległy, rola, konto) będzie dostępne w kroku 4.', 6000, 'warn');
+  }
   editing = null;
 });
 
-render();
+meReady.then(() => {
+  load();
+  api('/api/admin/settings').then(s => { defaultDays = s.default_days; setDefaultDays(); }).catch(() => {});
+});
 </script>
 </body>
 </html>
