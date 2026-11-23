@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ustawienia · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="panel.html">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="101" height="44">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </a>
+    <nav class="nav" aria-label="Główne menu">
+      <a href="panel.html">Mój urlop</a>
+      <!-- Linki admina pokazuje js/session.js według roli; serwer i tak sprawdza uprawnienia -->
+      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count">3</span></a>
+      <a href="admin-pracownicy.html">Pracownicy</a>
+      <a href="admin-ustawienia.html">Ustawienia</a>
+    </nav>
+    <div class="user">
+      <span class="avatar" aria-hidden="true"></span>
+      <span class="user-name"></span>
+      <form method="post" action="/logout"><button class="link-btn" type="submit">Wyloguj</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="page narrow">
+  <div class="head">
+    <div class="head-text">
+      <h1>Ustawienia</h1>
+      <p class="lead">Zmiany działają od razu dla wszystkich.</p>
+    </div>
+  </div>
+
+  <!-- ===== Poczta ===== -->
+  <form class="card" id="smtp-form" autocomplete="off" aria-labelledby="smtp-h">
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <h2 class="card-title" id="smtp-h">Poczta wychodząca</h2>
+      <p class="small muted">Z tego konta wychodzą zaproszenia, linki do zmiany hasła i powiadomienia o wnioskach.</p>
+    </div>
+    <div class="grid-fit">
+      <div class="field"><label for="s-host">Serwer SMTP</label><input id="s-host" name="smtp_host" required placeholder="np. smtp.twojadomena.pl"></div>
+      <div class="field"><label for="s-sec">Szyfrowanie</label>
+        <select id="s-sec" name="smtp_secure"><option value="starttls">STARTTLS</option><option value="tls">SSL/TLS</option><option value="none">Bez szyfrowania</option></select></div>
+      <div class="field"><label for="s-port">Port</label><input id="s-port" name="smtp_port" type="number" value="587" required></div>
+      <!-- autocomplete off/new-password: przeglądarka nie wpisze tu hasła administratora do aplikacji -->
+      <div class="field"><label for="s-user">Login</label><input id="s-user" name="smtp_user" autocomplete="off"></div>
+      <div class="field"><label for="s-pass">Hasło</label><input id="s-pass" name="smtp_password" type="password" autocomplete="new-password" placeholder="zapisane, wpisz aby zmienić"></div>
+      <div class="field"><label for="s-from">Adres nadawcy</label><input id="s-from" name="smtp_from" type="email" required></div>
+      <div class="field"><label for="s-name">Nazwa nadawcy</label><input id="s-name" name="smtp_from_name" value="Urlopy ZBIKS"></div>
+      <div class="field"><label for="s-url">Adres aplikacji w linkach z e-maili</label><input id="s-url" name="app_url" type="url" placeholder="https://urlopy.zbiks.pl" required></div>
+    </div>
+    <p class="msg" id="smtp-msg" role="status" hidden></p>
+    <div class="card-foot">
+      <label for="s-test" class="sr-only">Adres do testu</label>
+      <input id="s-test" type="email" placeholder="wyślij test na adres" autocomplete="off" style="flex: 1 1 200px; width: auto">
+      <button type="button" class="btn btn-ghost" id="smtp-test">Wyślij test</button>
+      <button class="btn">Zapisz pocztę</button>
+    </div>
+  </form>
+
+  <!-- ===== Zasady ===== -->
+  <form class="card" id="rules-form" aria-labelledby="rules-h">
+    <h2 class="card-title" id="rules-h">Zasady urlopowe</h2>
+    <div class="grid-fit">
+      <div class="field"><label for="r-def">Wymiar dla nowych osób</label>
+        <select id="r-def" name="default_days"><option value="20">20 dni</option><option value="26" selected>26 dni</option></select></div>
+      <div class="field"><label for="r-who">Kto zatwierdza wnioski</label>
+        <select id="r-who" name="approver"><option value="manager">Przełożony, a gdy go nie ma, administrator</option><option value="admins">Każdy administrator</option></select></div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <label class="check"><input type="checkbox" name="show_absent" checked><span>Pokazuj pracownikom, kto ma urlop w wybranym terminie</span></label>
+      <label class="check"><input type="checkbox" name="weekly_digest" checked><span>W poniedziałek rano wysyłaj listę nieobecnych w tym tygodniu</span></label>
+      <label class="check"><input type="checkbox" name="carry_reminder" checked><span>1 lipca przypominaj o zaległym urlopie, który trzeba wykorzystać do 30 września</span></label>
+    </div>
+    <p class="msg msg-ok" id="rules-msg" role="status" hidden>Zapisano zasady.</p>
+    <div class="card-foot"><button class="btn">Zapisz zasady</button></div>
+  </form>
+
+  <!-- ===== Dni wolne ===== -->
+  <form class="card" id="off-form" aria-labelledby="off-h">
+    <div class="card-head">
+      <div style="max-width: 520px">
+        <h2 class="card-title" id="off-h">Dni wolne w firmie</h2>
+        <p class="small muted">Za święto w sobotę trzeba wyznaczyć inny dzień wolny (art. 130 § 2 KP). Te dni nie zmniejszają puli urlopu.</p>
+      </div>
+      <div><label for="o-year" class="sr-only">Rok</label><select id="o-year" style="width: auto"><option>2026</option><option>2027</option></select></div>
+    </div>
+    <div class="dayoff-list" id="sat-list"></div>
+    <h3 class="label">Inne dni wolne</h3>
+    <div class="dayoff-list" id="extra-list"></div>
+    <p class="msg msg-ok" id="off-msg" role="status" hidden></p>
+    <div class="card-foot" style="justify-content: space-between">
+      <button type="button" class="btn btn-dashed" id="add-extra">Dodaj inny dzień wolny</button>
+      <button class="btn">Zapisz dni wolne</button>
+    </div>
+  </form>
+</main>
+
+<script src="js/holidays.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/session.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const WD = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
+
+/* ===== MOCK — docelowo GET/PUT /api/admin/days-off/:year ===== */
+const daysOff = {
+  2026: { replacements: { '2026-08-15': '2026-11-10', '2026-12-26': '2026-12-31' }, extra: [] },
+  2027: { replacements: {}, extra: [] },
+};
+/* ===== koniec MOCK ===== */
+
+// --- poczta
+const PORTS = { starttls: 587, tls: 465, none: 25 };
+$('s-sec').addEventListener('change', e => ($('s-port').value = PORTS[e.target.value]));
+function smtpMsg(kind, t) { const m = $('smtp-msg'); m.className = 'msg msg-' + kind; m.textContent = t; m.hidden = false; }
+$('smtp-test').addEventListener('click', () => {
+  const to = $('s-test').value.trim();
+  if (!to) return smtpMsg('err', 'Wpisz adres, na który wysłać test.');
+  smtpMsg('warn', 'Wysyłam…');
+  // Docelowo: POST /api/admin/settings/smtp-test { to } — błąd z serwera pokazać w całości (np. „535 Authentication failed”)
+  setTimeout(() => smtpMsg('ok', `Wysłano e-mail testowy na ${to}.`), 600);
+});
+$('smtp-form').addEventListener('submit', e => { e.preventDefault(); /* PUT /api/admin/settings */ smtpMsg('ok', 'Zapisano ustawienia poczty.'); });
+$('rules-form').addEventListener('submit', e => { e.preventDefault(); /* PUT /api/admin/settings */ $('rules-msg').hidden = false; });
+
+// --- dni wolne
+function renderOff() {
+  const y = +$('o-year').value, cfg = daysOff[y];
+  const sats = PL.saturdayHolidays(y);
+  $('sat-list').innerHTML = sats.length ? sats.map(s => `
+    <div class="dayoff">
+      <div class="what"><strong>${fmtNice(s.date)}, sobota</strong><span class="small muted">${s.name}</span></div>
+      <label for="sat-${s.date}" class="small muted">wolne w zamian</label>
+      <input type="date" id="sat-${s.date}" data-sat="${s.date}" value="${cfg.replacements[s.date] || ''}" min="${y}-01-01" max="${y}-12-31">
+      <span data-sat-info="${s.date}"></span>
+    </div>`).join('') : `<div class="dayoff muted">W ${y} roku żadne święto nie wypada w sobotę.</div>`;
+  sats.forEach(s => validateSat(s.date));
+
+  $('extra-list').innerHTML = cfg.extra.map((x, i) => `
+    <div class="dayoff">
+      <label for="ex-${i}" class="sr-only">Data</label>
+      <input type="date" id="ex-${i}" data-extra-date="${i}" value="${x.date}" min="${y}-01-01" max="${y}-12-31">
+      <label for="exn-${i}" class="sr-only">Opis</label>
+      <input type="text" id="exn-${i}" data-extra-name="${i}" value="${esc(x.name)}" placeholder="Np. dzień wolny za pracę w święto">
+      <button type="button" class="btn btn-danger btn-sm" data-extra-del="${i}">Usuń</button>
+    </div>`).join('') || '<div class="dayoff muted">Brak innych dni wolnych.</div>';
+}
+function validateSat(date) {
+  const v = document.querySelector(`[data-sat="${date}"]`).value, info = document.querySelector(`[data-sat-info="${date}"]`);
+  if (!v) { info.className = 'state-bad'; info.textContent = 'Wyznacz dzień'; return; }
+  const ok = PL.isWorkingDay(PL.parse(v));
+  info.className = ok ? 'state-ok' : 'state-bad';
+  info.textContent = ok ? WD[PL.parse(v).getDay()] : 'To nie jest dzień roboczy';
+}
+$('o-year').addEventListener('change', renderOff);
+$('sat-list').addEventListener('change', e => {
+  const d = e.target.dataset.sat; if (!d) return;
+  daysOff[+$('o-year').value].replacements[d] = e.target.value; validateSat(d);
+});
+$('extra-list').addEventListener('input', e => {
+  const list = daysOff[+$('o-year').value].extra;
+  if (e.target.dataset.extraDate) list[e.target.dataset.extraDate].date = e.target.value;
+  if (e.target.dataset.extraName) list[e.target.dataset.extraName].name = e.target.value;
+});
+$('extra-list').addEventListener('click', e => {
+  const i = e.target.dataset.extraDel; if (i === undefined) return;
+  daysOff[+$('o-year').value].extra.splice(i, 1); renderOff();
+});
+$('add-extra').addEventListener('click', () => { daysOff[+$('o-year').value].extra.push({ date: '', name: '' }); renderOff(); });
+$('off-form').addEventListener('submit', e => {
+  e.preventDefault();
+  // Docelowo: PUT /api/admin/days-off/:year — serwer przelicza dni we wnioskach obejmujących zmienione daty
+  $('off-msg').textContent = 'Zapisano dni wolne. Wnioski obejmujące te dni zostaną przeliczone.'; $('off-msg').hidden = false;
+});
+
+renderOff();
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Załóż konto · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-aside">
+    <div class="auth-brand">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="120" height="52">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </div>
+
+    <div class="auth-story">
+      <!-- Wymiar z zaproszenia: GET /api/invite?token= -->
+      <h2 id="pool-head">Witaj w Urlopach ZBIKS</h2>
+      <ol class="auth-steps">
+        <li><b>1</b><span>Ustaw hasło do konta.</span></li>
+        <li><b>2</b><span>Zaznacz termin w kalendarzu ze świętami.</span></li>
+        <li><b>3</b><span>Decyzję przełożonego dostaniesz e-mailem.</span></li>
+      </ol>
+    </div>
+    <p class="auth-soft small" id="invite-info"></p>
+  </aside>
+
+  <main class="auth-main">
+    <!-- Wejście: /rejestracja.html?token=XXXX (link z e-maila). Serwer sprawdza token przy GET i przy POST.
+         E-mail jest widoczny i tylko do odczytu: menedżer haseł zapisze parę login + hasło. -->
+    <form class="auth-form" method="post" action="/rejestracja" id="reg-form" novalidate>
+      <input type="hidden" name="token" id="token">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1>Załóż konto</h1>
+        <p class="muted">Przeglądarka może sama zaproponować silne hasło i je zapamiętać.</p>
+      </div>
+      <p class="msg msg-err" id="token-error" role="alert" hidden>Link wygasł albo został już użyty. Poproś administratora o nowe zaproszenie.</p>
+      <div class="field">
+        <label for="email">Adres e-mail</label>
+        <input id="email" name="email" type="email" autocomplete="username" readonly>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="first">Imię</label><input id="first" name="first_name" autocomplete="given-name" maxlength="60" required></div>
+        <div class="field"><label for="last">Nazwisko</label><input id="last" name="last_name" autocomplete="family-name" maxlength="60" required></div>
+      </div>
+      <div class="field">
+        <label for="pw">Hasło</label>
+        <input id="pw" name="password" type="password" autocomplete="new-password" minlength="8" required aria-describedby="pw-hint">
+        <span class="hint" id="pw-hint">Co najmniej 8 znaków.</span>
+      </div>
+      <div class="field">
+        <label for="pw2">Powtórz hasło</label>
+        <input id="pw2" name="password_confirm" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <p class="msg msg-err" id="form-error" role="alert" hidden></p>
+      <button class="btn btn-block" type="submit">Utwórz konto</button>
+    </form>
+  </main>
+</div>
+<script>
+  const p = new URLSearchParams(location.search);
+  const $ = id => document.getElementById(id);
+  const MONTHS = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia'];
+  const SERVER_ERR = {
+    name: 'Wpisz imię i nazwisko.',
+    password: 'Hasło musi mieć co najmniej 8 znaków.',
+    mismatch: 'Hasła się różnią. Wpisz je jeszcze raz.',
+  };
+  const token = p.get('token') || '';
+  $('token').value = token;
+
+  function linkBroken() {
+    $('token-error').hidden = false;
+    $('reg-form').querySelectorAll('input, button').forEach(el => (el.disabled = true));
+  }
+
+  if (p.has('expired') || !token) linkBroken();
+  else {
+    fetch('/api/invite?token=' + encodeURIComponent(token), { headers: { Accept: 'application/json' } })
+      .then(r => (r.ok ? r.json() : Promise.reject(r)))
+      .then(inv => {
+        $('email').value = inv.email;
+        if (!$('first').value) $('first').value = inv.first_name || '';
+        if (!$('last').value) $('last').value = inv.last_name || '';
+        if (inv.days != null) $('pool-head').textContent = `Twoja pula na ${inv.year} już czeka: ${inv.days} dni`;
+        const until = new Date(inv.expires_at);
+        $('invite-info').textContent = (inv.invited_by ? `Zaproszenie od: ${inv.invited_by}, ważne` : 'Zaproszenie ważne')
+          + ` do ${until.getDate()} ${MONTHS[until.getMonth()]}.`;
+      })
+      .catch(linkBroken);
+    if (SERVER_ERR[p.get('error')]) { $('form-error').textContent = SERVER_ERR[p.get('error')]; $('form-error').hidden = false; }
+  }
+
+  document.getElementById('reg-form').addEventListener('submit', e => {
+    const v = id => document.getElementById(id).value;
+    const err = document.getElementById('form-error');
+    let msg = '';
+    if (!v('first').trim() || !v('last').trim()) msg = 'Wpisz imię i nazwisko.';
+    else if (v('pw').length < 8) msg = 'Hasło musi mieć co najmniej 8 znaków.';
+    else if (v('pw') !== v('pw2')) msg = 'Hasła się różnią. Wpisz je jeszcze raz.';
+    err.textContent = msg; err.hidden = !msg;
+    if (msg) e.preventDefault();
+  });
+</script>
+</body>
+</html>

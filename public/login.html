@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Logowanie · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-aside">
+    <div class="auth-brand">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="120" height="52">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </div>
+
+    <div class="auth-story">
+      <h2>Najbliższe dni wolne</h2>
+      <div class="auth-days" id="next-days"></div>
+    </div>
+    <p class="auth-soft small">Zakład Budownictwa Inżynieryjnego Karol Szymański</p>
+  </aside>
+
+  <main class="auth-main">
+    <!-- Zwykły POST z przekierowaniem: tak przeglądarki i menedżery haseł najlepiej rozpoznają logowanie.
+         autocomplete="username" / "current-password" odpowiada za zapamiętywanie i podpowiadanie haseł. -->
+    <form class="auth-form" method="post" action="/login">
+      <input type="hidden" name="next" id="next">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1>Zaloguj się</h1>
+        <p class="muted">Złożysz wniosek i sprawdzisz, ile dni Ci zostało.</p>
+      </div>
+      <p class="msg msg-err" id="login-error" role="alert" hidden>Nieprawidłowy e-mail lub hasło.</p>
+      <div class="field">
+        <label for="email">Adres e-mail</label>
+        <input id="email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required autofocus>
+      </div>
+      <div class="field">
+        <div class="auth-row"><label for="password">Hasło</label><a href="reset-hasla.html" class="small">Nie pamiętasz?</a></div>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <label class="check small"><input type="checkbox" name="remember" value="1" checked><span>Nie wylogowuj mnie na tym urządzeniu przez 30 dni</span></label>
+      <button class="btn btn-block" type="submit">Zaloguj się</button>
+      <p class="small muted">Nie masz konta? Załóż je z linku w zaproszeniu od administratora.</p>
+    </form>
+  </main>
+</div>
+<script src="js/holidays.js"></script>
+<script src="js/ui.js"></script>
+<script>
+  // Serwer po nieudanym logowaniu przekierowuje na /login.html?error=1 (albo error=limit po zbyt wielu próbach)
+  const q = new URLSearchParams(location.search), loginErr = document.getElementById('login-error');
+  if (q.get('error') === 'limit') loginErr.textContent = 'Zbyt wiele nieudanych prób. Spróbuj ponownie za 15 minut.';
+  if (q.has('error')) loginErr.hidden = false;
+  // Po zalogowaniu wróć na stronę, z której przekierował serwer (serwer sprawdza, czy to znana strona)
+  document.getElementById('next').value = q.get('next') || '';
+
+  // Najbliższe 4 święta ustawowe (dni wolne firmy można dołożyć z GET /api/public/days-off)
+  const t = new Date(), today = PL.iso(t);
+  const next = [...PL.holidays(t.getFullYear()), ...PL.holidays(t.getFullYear() + 1)].filter(([d]) => d >= today).slice(0, 4);
+  document.getElementById('next-days').innerHTML = next.map(([d, n]) => `<div><strong>${fmtNice(d)}</strong><span>${n}</span></div>`).join('');
+</script>
+</body>
+</html>

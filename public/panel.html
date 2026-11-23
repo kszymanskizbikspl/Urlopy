@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mój urlop · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="panel.html">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="101" height="44">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </a>
+    <nav class="nav" aria-label="Główne menu">
+      <a href="panel.html">Mój urlop</a>
+      <!-- Linki admina pokazuje js/session.js według roli; serwer i tak sprawdza uprawnienia -->
+      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count">3</span></a>
+      <a href="admin-pracownicy.html">Pracownicy</a>
+      <a href="admin-ustawienia.html">Ustawienia</a>
+    </nav>
+    <div class="user">
+      <span class="avatar" aria-hidden="true"></span>
+      <span class="user-name"></span>
+      <form method="post" action="/logout"><button class="link-btn" type="submit">Wyloguj</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="head">
+    <div class="head-text">
+      <h1>Twój urlop w <span id="year">2026</span></h1>
+      <p class="lead">Liczymy tylko dni robocze. Weekendy, święta i dni wolne w firmie nie zmniejszają puli.</p>
+    </div>
+  </div>
+
+  <section class="card balance" aria-label="Saldo urlopu">
+    <div class="balance-big">
+      <span class="balance-num" id="b-left">–</span>
+      <span class="muted">dni do wykorzystania</span>
+    </div>
+    <div class="balance-detail">
+      <div class="bar" role="img" id="b-bar" aria-label="">
+        <div class="bar-used" id="b-used-bar"></div>
+        <div class="bar-pend" id="b-pend-bar"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="stat-label"><span>Pula na <span class="b-year">2026</span></span></span><span class="stat-value" id="b-pool"></span><span class="small muted" id="b-pool-sub"></span></div>
+        <div class="stat"><span class="stat-label"><i class="swatch"></i>Wykorzystane</span><span class="stat-value" id="b-used"></span><span class="small muted" id="b-carry"></span></div>
+        <div class="stat"><span class="stat-label"><i class="swatch pend"></i>Czeka na akceptację</span><span class="stat-value" id="b-pend"></span></div>
+        <div class="stat"><span class="stat-label">Urlop na żądanie</span><span class="stat-value" id="b-nz"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="card col-main" aria-labelledby="cal-h">
+      <div id="cal"></div>
+      <div class="legend">
+        <span><i class="lg-sel"></i>Twój wybór</span>
+        <span><i class="lg-ok"></i>Zatwierdzony urlop</span>
+        <span><i class="lg-pend"></i>Czeka na akceptację</span>
+        <span><i class="lg-hol"></i>Święto lub dzień wolny</span>
+      </div>
+    </section>
+
+    <form class="card col-side" id="req-form" aria-labelledby="form-h">
+      <h2 class="card-title" id="form-h">Nowy wniosek</h2>
+      <div class="grid-dates">
+        <div class="field"><label for="from">Od</label><input type="date" id="from" name="date_from" required></div>
+        <div class="field"><label for="to">Do</label><input type="date" id="to" name="date_to" required></div>
+      </div>
+      <div class="field">
+        <label for="type">Rodzaj urlopu</label>
+        <select id="type" name="type">
+          <option value="wypoczynkowy">Wypoczynkowy</option>
+          <option value="na_zadanie">Na żądanie</option>
+          <option value="okolicznosciowy">Okolicznościowy</option>
+          <option value="opieka_188">Opieka nad dzieckiem (art. 188)</option>
+          <option value="sila_wyzsza">Siła wyższa (art. 148¹)</option>
+          <option value="bezplatny">Bezpłatny</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sub">Kto Cię zastąpi</label>
+        <select id="sub" name="substitute_id">
+          <option value="">Bez zastępstwa</option>
+          <option value="2">Piotr Nowak</option>
+          <option value="3">Marta Wiśniewska</option>
+          <option value="4">Tomasz Zieliński</option>
+          <option value="5">Katarzyna Lewandowska</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="note">Uwagi dla przełożonego</label>
+        <textarea id="note" name="note" rows="3" placeholder="Np. co przekazujesz zastępcy"></textarea>
+      </div>
+      <div class="summary">
+        <div class="summary-row"><span class="muted">Dni robocze</span><span class="summary-days" id="sum-days">–</span></div>
+        <div class="summary-row small"><span class="muted">Zostanie po akceptacji</span><span id="sum-left">–</span></div>
+      </div>
+      <p class="msg" id="msg" role="status" hidden></p>
+      <button class="btn btn-block" type="submit" id="submit" disabled>Złóż wniosek</button>
+    </form>
+  </div>
+
+  <section class="list" aria-labelledby="list-h">
+    <h2 class="list-title" id="list-h">Moje wnioski</h2>
+    <div id="req-rows"></div>
+  </section>
+</main>
+
+<script src="js/holidays.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/session.js"></script>
+<script>
+/* ===== MOCK — docelowo: GET /api/me/balance?year=, GET /api/me/requests?year=, GET /api/calendar ===== */
+const TYPES = { wypoczynkowy: 'Wypoczynkowy', na_zadanie: 'Na żądanie', okolicznosciowy: 'Okolicznościowy', opieka_188: 'Opieka nad dzieckiem', sila_wyzsza: 'Siła wyższa', bezplatny: 'Bezpłatny' };
+const POOL_TYPES = ['wypoczynkowy', 'na_zadanie'];            // odejmowane od puli urlopu wypoczynkowego
+const LIMITS = { na_zadanie: 4, opieka_188: 2, sila_wyzsza: 2 }; // roczne limity dni
+
+const data = {
+  year: 2026,
+  allowance: 26,               // wymiar ustawiony przez admina
+  carried: 4,                  // zaległy z poprzedniego roku (wyliczony przez serwer)
+  carriedDeadline: '2026-09-30',
+  companyDaysOff: [['2026-11-10', 'Dzień wolny za 15 sierpnia'], ['2026-12-31', 'Dzień wolny za 26 grudnia']],
+  requests: [
+    { id: 41, from: '2026-12-28', to: '2026-12-30', days: 3, type: 'wypoczynkowy', status: 'pending' },
+    { id: 37, from: '2026-11-12', to: '2026-11-13', days: 2, type: 'wypoczynkowy', status: 'approved', by: 'Tomasz Zieliński' },
+    { id: 30, from: '2026-08-03', to: '2026-08-14', days: 10, type: 'wypoczynkowy', status: 'approved', by: 'Tomasz Zieliński' },
+    { id: 22, from: '2026-05-04', to: '2026-05-05', days: 2, type: 'wypoczynkowy', status: 'approved', by: 'Tomasz Zieliński' },
+    { id: 18, from: '2026-04-07', to: '2026-04-07', days: 1, type: 'wypoczynkowy', status: 'approved', by: 'Tomasz Zieliński' },
+    { id: 12, from: '2026-02-16', to: '2026-02-16', days: 1, type: 'na_zadanie', status: 'approved', by: 'Tomasz Zieliński' },
+    { id: 9,  from: '2026-01-19', to: '2026-01-23', days: 5, type: 'wypoczynkowy', status: 'rejected', reason: 'Odbiór końcowy na budowie' },
+  ],
+};
+/* ===== koniec MOCK ===== */
+
+const extraOff = new Map(data.companyDaysOff);
+const $ = id => document.getElementById(id);
+const today = PL.iso(new Date());
+
+function totals() {
+  const sum = st => data.requests.filter(r => r.status === st && POOL_TYPES.includes(r.type)).reduce((a, r) => a + r.days, 0);
+  const used = sum('approved'), pending = sum('pending'), pool = data.allowance + data.carried;
+  return { pool, used, pending, left: pool - used - pending, carriedLeft: Math.max(0, data.carried - used - pending) }; // zaległy zużywany jako pierwszy
+}
+const usedOfType = t => data.requests.filter(r => r.type === t && ['approved', 'pending'].includes(r.status)).reduce((a, r) => a + r.days, 0);
+
+function renderBalance() {
+  const t = totals();
+  document.querySelectorAll('.b-year').forEach(e => (e.textContent = data.year));
+  $('year').textContent = data.year;
+  $('b-left').textContent = t.left;
+  $('b-used-bar').style.width = (t.used / t.pool * 100) + '%';
+  $('b-pend-bar').style.width = (t.pending / t.pool * 100) + '%';
+  $('b-bar').setAttribute('aria-label', `Wykorzystane ${t.used}, czeka ${t.pending}, zostało ${t.left} z ${t.pool} dni`);
+  $('b-pool').textContent = plDays(t.pool);
+  $('b-pool-sub').textContent = `${data.allowance} wymiaru + ${data.carried} zaległe`;
+  $('b-used').textContent = plDays(t.used);
+  $('b-carry').textContent = t.carriedLeft > 0
+    ? `zaległe: zostało ${t.carriedLeft}, do ${fmtNice(data.carriedDeadline)}`
+    : `zaległe z ${data.year - 1} już zużyte`;
+  $('b-pend').textContent = plDays(t.pending);
+  $('b-nz').textContent = `${usedOfType('na_zadanie')} z ${LIMITS.na_zadanie} dni`;
+}
+
+function renderRequests() {
+  $('req-rows').innerHTML = data.requests.map(r => {
+    const sub = TYPES[r.type] + (r.status === 'rejected' && r.reason ? `, ${esc(r.reason)}` : r.by ? `, zatwierdził ${esc(r.by)}` : '');
+    return `<div class="list-row">
+      <div class="main"><strong>${fmtNice(r.from, r.to)}</strong><span class="sub">${sub}</span></div>
+      <span class="days">${plDays(r.days)}</span>
+      <span class="st">${badge(r.status)}</span>
+      <div class="act">${r.status === 'pending' ? `<button type="button" class="btn btn-danger btn-sm" data-cancel="${r.id}">Wycofaj</button>`
+        : r.status === 'approved' && r.from > today ? `<button type="button" class="btn btn-ghost btn-sm" data-cancel="${r.id}">Anuluj</button>` : ''}</div>
+    </div>`;
+  }).join('') || '<p class="empty">Nie masz jeszcze wniosków w tym roku.</p>';
+}
+
+const calEvents = () => data.requests
+  .filter(r => r.status === 'approved' || r.status === 'pending')
+  .map(r => ({ from: r.from, to: r.to, status: r.status, label: `${TYPES[r.type]}, ${STATUS[r.status][0].toLowerCase()}` }));
+
+const cal = new LeaveCalendar($('cal'), {
+  months: 2, events: calEvents(), extraOff, minDate: today,
+  heading: '<h2 class="card-title" id="cal-h">Wybierz termin</h2><p class="small muted">Kliknij pierwszy, potem ostatni dzień urlopu.</p>',
+  onSelect(f, t) { $('from').value = f || ''; $('to').value = t || ''; update(); },
+});
+
+function show(kind, text) { const m = $('msg'); m.className = 'msg msg-' + kind; m.textContent = text; m.hidden = !text; }
+
+function update() {
+  const f = $('from').value, t = $('to').value, type = $('type').value;
+  show('', '');
+  $('submit').disabled = true;
+  if (!f || !t) { $('sum-days').textContent = '–'; $('sum-left').textContent = '–'; return; }
+  if (t < f) return show('err', 'Data końcowa jest wcześniejsza niż początkowa.');
+  if (f.slice(0, 4) !== t.slice(0, 4)) return show('err', 'Wniosek nie może obejmować dwóch lat. Złóż osobny na każdy rok.');
+
+  const days = PL.countWorkingDays(f, t, extraOff);
+  const tot = totals(), inPool = POOL_TYPES.includes(type);
+  $('sum-days').textContent = days;
+  $('sum-left').textContent = inPool ? plDays(tot.left - days) : 'bez zmian';
+
+  if (days === 0) return show('err', 'W tym terminie nie ma dni roboczych.');
+  if (inPool && days > tot.left) return show('err', `Brakuje ${plDays(days - tot.left)}. Do wykorzystania masz ${plDays(tot.left)}.`);
+  if (LIMITS[type] && usedOfType(type) + days > LIMITS[type])
+    return show('err', `Limit dla tego rodzaju to ${plDays(LIMITS[type])} w roku. Wykorzystano już ${usedOfType(type)}.`);
+  if (cal.overlaps(f, t)) return show('warn', 'Ten termin pokrywa się z innym Twoim wnioskiem.');
+  if (inPool && tot.carriedLeft > 0) show('ok', `Najpierw zostanie wykorzystany zaległy urlop: ${plDays(Math.min(days, tot.carriedLeft))}.`);
+  $('submit').disabled = false;
+}
+
+['from', 'to'].forEach(id => $(id).addEventListener('change', () => { cal.setRange($('from').value, $('to').value || $('from').value); update(); }));
+$('type').addEventListener('change', update);
+
+$('req-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  // Docelowo: await fetch('/api/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify(body) });
+  const days = PL.countWorkingDays(body.date_from, body.date_to, extraOff);
+  data.requests.unshift({ id: Date.now(), from: body.date_from, to: body.date_to, days, type: body.type, status: 'pending' });
+  e.target.reset(); cal.clear(); cal.setEvents(calEvents());
+  renderBalance(); renderRequests(); update();
+  show('ok', 'Wniosek wysłany. Dostaniesz e-mail, gdy przełożony go rozpatrzy.');
+});
+
+$('req-rows').addEventListener('click', e => {
+  const b = e.target.closest('[data-cancel]'); if (!b) return;
+  const r = data.requests.find(x => x.id == b.dataset.cancel);
+  if (!confirm(`Wycofać wniosek ${fmtNice(r.from, r.to)}?`)) return;
+  // Docelowo: POST /api/requests/:id/cancel (zatwierdzony urlop w przyszłości wymaga zgody przełożonego)
+  r.status = 'cancelled';
+  cal.setEvents(calEvents()); renderBalance(); renderRequests();
+});
+
+renderBalance(); renderRequests();
+</script>
+</body>
+</html>

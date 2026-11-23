@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wnioski · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="panel.html">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="101" height="44">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </a>
+    <nav class="nav" aria-label="Główne menu">
+      <a href="panel.html">Mój urlop</a>
+      <!-- Linki admina pokazuje js/session.js według roli; serwer i tak sprawdza uprawnienia -->
+      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count">3</span></a>
+      <a href="admin-pracownicy.html">Pracownicy</a>
+      <a href="admin-ustawienia.html">Ustawienia</a>
+    </nav>
+    <div class="user">
+      <span class="avatar" aria-hidden="true"></span>
+      <span class="user-name"></span>
+      <form method="post" action="/logout"><button class="link-btn" type="submit">Wyloguj</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="head">
+    <div class="head-text">
+      <h1 id="title">Wnioski do rozpatrzenia</h1>
+      <p class="lead">Pracownik dostaje e-mail z decyzją od razu po kliknięciu.</p>
+    </div>
+  </div>
+
+  <div class="chips" role="tablist" aria-label="Filtr wniosków" id="tabs">
+    <button type="button" role="tab" data-f="pending" aria-selected="true">Do rozpatrzenia <span id="c-pending"></span></button>
+    <button type="button" role="tab" data-f="approved" aria-selected="false">Zatwierdzone</button>
+    <button type="button" role="tab" data-f="rejected" aria-selected="false">Odrzucone</button>
+    <button type="button" role="tab" data-f="all" aria-selected="false">Wszystkie</button>
+  </div>
+  <p class="msg msg-ok" id="toast" role="status" hidden></p>
+
+  <div id="rows" style="display: flex; flex-direction: column; gap: 16px"></div>
+</main>
+
+<dialog id="reject-dlg">
+  <form method="dialog">
+    <h2 class="card-title">Odrzuć wniosek</h2>
+    <p class="muted" id="reject-what"></p>
+    <div class="field">
+      <label for="reason">Powód (pracownik zobaczy go w e-mailu)</label>
+      <textarea id="reason" required placeholder="Np. odbiór robót w tym terminie, proszę o inny"></textarea>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" value="cancel" formnovalidate>Anuluj</button>
+      <button class="btn btn-danger" value="ok">Odrzuć wniosek</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="js/ui.js"></script>
+<script src="js/session.js"></script>
+<script>
+/* ===== MOCK — docelowo GET /api/admin/requests?status= ===== */
+const rows = [
+  { id: 51, name: 'Piotr Nowak', from: '2026-12-21', to: '2026-12-23', days: 3, type: 'wypoczynkowy', sub: 'Marta Wiśniewska', left: 9, created: '2026-11-20', status: 'pending', note: 'Sprawy Drahle przekazane Marcie.', g: 'mu' },
+  { id: 52, name: 'Marta Wiśniewska', from: '2026-12-22', to: '2026-12-23', days: 2, type: 'wypoczynkowy', sub: '', left: 5, created: '2026-11-21', status: 'pending', g: 'jej' },
+  { id: 53, name: 'Tomasz Zieliński', from: '2026-11-27', to: '2026-11-27', days: 1, type: 'na żądanie', sub: '', left: 14, created: '2026-11-23', status: 'pending', g: 'mu' },
+  { id: 48, name: 'Katarzyna Lewandowska', from: '2026-12-28', to: '2026-12-30', days: 3, type: 'wypoczynkowy', sub: 'Piotr Nowak', left: 6, created: '2026-11-02', status: 'approved', g: 'jej' },
+  { id: 33, name: 'Piotr Nowak', from: '2026-10-05', to: '2026-10-09', days: 5, type: 'wypoczynkowy', sub: '', left: 12, created: '2026-09-14', status: 'approved', g: 'mu' },
+  { id: 29, name: 'Tomasz Zieliński', from: '2026-10-19', to: '2026-10-20', days: 2, type: 'wypoczynkowy', sub: '', left: 15, created: '2026-10-01', status: 'rejected', reason: 'Odbiór DW 653', g: 'mu' },
+];
+/* ===== koniec MOCK ===== */
+// Własnych wniosków administrator tu nie widzi: trafiają do przełożonego albo drugiego admina.
+
+let filter = 'pending', current = null;
+const $ = id => document.getElementById(id);
+const TITLES = { pending: 'Wnioski do rozpatrzenia', approved: 'Zatwierdzone wnioski', rejected: 'Odrzucone wnioski', all: 'Wszystkie wnioski' };
+
+const others = r => rows.filter(o => o.id !== r.id && o.name !== r.name && ['pending', 'approved'].includes(o.status) && o.from <= r.to && o.to >= r.from);
+
+function card(r) {
+  const c = others(r);
+  const subAway = r.sub && c.find(o => o.name === r.sub);
+  const rest = c.filter(o => o.name !== r.sub);
+  let alert = '';
+  if (subAway) alert = `<p class="msg msg-err">Zastępca ${esc(r.sub)} też ${subAway.status === 'pending' ? 'prosi o urlop' : 'ma urlop'} ${fmtNice(subAway.from, subAway.to)}.</p>`;
+  else if (rest.length) alert = `<p class="msg msg-warn">W tym czasie nieobecni będą też: ${rest.map(o => esc(o.name)).join(', ')}.</p>`;
+  const right = r.status === 'pending'
+    ? `<div class="req-actions"><button type="button" class="btn btn-danger" data-reject="${r.id}">Odrzuć</button><button type="button" class="btn" data-approve="${r.id}">Zatwierdź</button></div>`
+    : badge(r.status, r.status === 'rejected' && r.reason ? `Odrzucony: ${esc(r.reason)}` : '');
+  return `<article class="card req">
+    <div class="req-who"><strong>${esc(r.name)}</strong><span class="small muted">złożony ${r.created === new Date().toISOString().slice(0, 10) ? 'dziś' : fmtNice(r.created)}</span></div>
+    <div class="req-facts">
+      <div><span>Termin</span><span>${fmtNice(r.from, r.to)}</span></div>
+      <div><span>Dni</span><span>${r.days}, ${r.type}</span></div>
+      <div><span>Zostanie ${r.g}</span><span>${plDays(r.left)}</span></div>
+      <div><span>Zastępstwo</span><span>${r.sub ? esc(r.sub) : 'brak'}</span></div>
+    </div>
+    ${right}
+    ${r.status === 'pending' ? alert : ''}
+    ${r.note ? `<p class="note">Uwagi: ${esc(r.note)}</p>` : ''}
+  </article>`;
+}
+
+function render() {
+  const list = rows.filter(r => filter === 'all' || r.status === filter);
+  const pending = rows.filter(r => r.status === 'pending').length;
+  $('c-pending').textContent = pending || '';
+  $('nav-count').textContent = pending; $('nav-count').hidden = !pending;
+  $('title').textContent = TITLES[filter];
+  $('rows').innerHTML = list.map(card).join('')
+    || `<p class="card empty" style="border-top: 1px solid var(--line)">${filter === 'pending' ? 'Wszystkie wnioski są rozpatrzone.' : 'Brak wniosków w tej kategorii.'}</p>`;
+}
+
+function toast(t) { $('toast').textContent = t; $('toast').hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => ($('toast').hidden = true), 4000); }
+
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-f]'); if (!b) return;
+  filter = b.dataset.f;
+  $('tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-selected', x === b));
+  render();
+});
+
+$('rows').addEventListener('click', e => {
+  const a = e.target.closest('[data-approve]'), r = e.target.closest('[data-reject]');
+  if (a) {
+    const row = rows.find(x => x.id == a.dataset.approve);
+    // Docelowo: POST /api/admin/requests/:id/approve
+    row.status = 'approved'; render();
+    toast(`Zatwierdzono urlop: ${row.name}, ${fmtNice(row.from, row.to)}. Wysłano e-mail.`);
+  }
+  if (r) {
+    current = rows.find(x => x.id == r.dataset.reject);
+    $('reject-what').textContent = `${current.name}, ${fmtNice(current.from, current.to)} (${plDays(current.days)})`;
+    $('reason').value = '';
+    $('reject-dlg').showModal();
+  }
+});
+
+$('reject-dlg').addEventListener('close', () => {
+  if ($('reject-dlg').returnValue !== 'ok' || !current) return;
+  // Docelowo: POST /api/admin/requests/:id/reject { reason }
+  current.status = 'rejected'; current.reason = $('reason').value.trim();
+  render(); toast(`Odrzucono wniosek: ${current.name}. Wysłano e-mail z powodem.`);
+  current = null;
+});
+
+render();
+</script>
+</body>
+</html>

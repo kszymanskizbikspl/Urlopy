@@ -1,0 +1,22 @@
+{
+  "name": "urlopy-zbiks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wnioski urlopowe ZBIKS",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/db.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "argon2": "^0.45.2",
+    "better-sqlite3": "^13.2.0",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0"
+  }
+}

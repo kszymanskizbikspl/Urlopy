@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pracownicy · Urlopy ZBIKS</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="panel.html">
+      <img class="logo" src="img/logo-zbiks.png" alt="Zakład Budownictwa Inżynieryjnego" width="101" height="44">
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="appname">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="M9 14.5l2 2 4-4"></path></svg>
+        Urlopy ZBIKS
+      </span>
+    </a>
+    <nav class="nav" aria-label="Główne menu">
+      <a href="panel.html">Mój urlop</a>
+      <!-- Linki admina pokazuje js/session.js według roli; serwer i tak sprawdza uprawnienia -->
+      <a href="admin-wnioski.html">Wnioski <span class="count" id="nav-count">3</span></a>
+      <a href="admin-pracownicy.html">Pracownicy</a>
+      <a href="admin-ustawienia.html">Ustawienia</a>
+    </nav>
+    <div class="user">
+      <span class="avatar" aria-hidden="true"></span>
+      <span class="user-name"></span>
+      <form method="post" action="/logout"><button class="link-btn" type="submit">Wyloguj</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="head">
+    <div class="head-text">
+      <h1>Pracownicy</h1>
+      <p class="lead">Niewykorzystany urlop przechodzi na następny rok sam. Możesz go poprawić ręcznie przy edycji osoby.</p>
+    </div>
+    <div class="field">
+      <label for="year">Rok</label>
+      <select id="year" style="min-width: 120px"><option>2025</option><option selected>2026</option><option>2027</option></select>
+    </div>
+  </div>
+
+  <p class="msg msg-ok" id="toast" role="status" hidden></p>
+  <div class="msg msg-warn" id="no-year" hidden style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+    <span>Na ten rok nie ustawiono jeszcze wymiaru urlopu dla wszystkich.</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="copy-year">Przenieś wymiary z poprzedniego roku</button>
+  </div>
+
+  <div class="cols">
+    <section class="card table-box col-main" aria-label="Lista pracowników">
+      <table>
+        <thead><tr>
+          <th>Osoba</th><th class="num">Wymiar</th><th class="num">Zaległy</th><th class="num">Wzięte</th><th class="num">Zostało</th><th><span class="sr-only">Akcje</span></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="table-note">„Wzięte” to dni zatwierdzone + dni czekające na akceptację.</p>
+    </section>
+
+    <form class="card col-side" id="invite-form" aria-labelledby="inv-h">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h2 class="card-title" id="inv-h">Zaproś pracownika</h2>
+        <p class="small muted">Wyślemy e-mail z linkiem do założenia konta, ważnym 7 dni.</p>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="i-first">Imię</label><input id="i-first" required autocomplete="off"></div>
+        <div class="field"><label for="i-last">Nazwisko</label><input id="i-last" required autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="i-email">Służbowy e-mail</label><input id="i-email" type="email" required autocomplete="off" placeholder="imie.nazwisko@zbiks.pl"></div>
+      <fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+        <legend class="label" style="padding: 0; margin-bottom: 8px">Wymiar urlopu w <span class="y">2026</span></legend>
+        <div class="choice-row">
+          <label class="choice"><input type="radio" name="dim" value="20">20 dni</label>
+          <label class="choice"><input type="radio" name="dim" value="26" checked>26 dni</label>
+        </div>
+        <span class="hint">26 dni po 10 latach stażu, wliczając szkołę.</span>
+      </fieldset>
+      <div class="field">
+        <label for="i-carry">Zaległy urlop na start</label>
+        <input id="i-carry" type="number" min="0" max="80" value="0">
+        <span class="hint">Dla osób, które już u Was pracują: saldo z kadr.</span>
+      </div>
+      <div class="field">
+        <label for="i-role">Rola</label>
+        <select id="i-role"><option value="employee">Pracownik</option><option value="manager">Przełożony, zatwierdza wnioski</option><option value="admin">Administrator</option></select>
+      </div>
+      <button class="btn btn-block" type="submit">Wyślij zaproszenie</button>
+    </form>
+  </div>
+</main>
+
+<dialog id="edit-dlg">
+  <form method="dialog">
+    <h2 class="card-title" id="e-title">Edytuj</h2>
+    <div class="grid-2">
+      <div class="field"><label for="e-days">Wymiar w <span class="y">2026</span></label><input id="e-days" type="number" min="0" max="40" required></div>
+      <div class="field"><label for="e-role">Rola</label>
+        <select id="e-role"><option value="employee">Pracownik</option><option value="manager">Przełożony</option><option value="admin">Administrator</option></select></div>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="e-override"><span>Popraw ręcznie zaległy urlop</span></label>
+      <input id="e-carry" type="number" min="0" max="80" disabled>
+      <span class="hint" id="e-carry-hint"></span>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="e-active"><span>Konto aktywne</span></label>
+      <span class="hint">Wyłączone konto nie może się zalogować. Historia urlopów zostaje.</span>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="e-reset" style="align-self: flex-start">Wyślij link do zmiany hasła</button>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" value="cancel" formnovalidate>Anuluj</button>
+      <button class="btn" value="ok">Zapisz zmiany</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="js/ui.js"></script>
+<script src="js/session.js"></script>
+<script>
+/* ===== MOCK — docelowo GET /api/admin/users?year= ===== */
+const ROLES = { employee: 'Pracownik', manager: 'Przełożony', admin: 'Administrator' };
+const users = [
+  { id: 1, first: 'Anna', last: 'Kowalska', email: 'a.kowalska@zbiks.pl', role: 'admin', state: 'active', y: { 2025: { days: 26, carryAuto: 2, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 4, used: 16, pending: 3 } } },
+  { id: 2, first: 'Piotr', last: 'Nowak', email: 'p.nowak@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 26, carryAuto: 0, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 2, used: 16, pending: 3 } } },
+  { id: 3, first: 'Marta', last: 'Wiśniewska', email: 'm.wisniewska@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 20, carryAuto: 0, used: 20, pending: 0 }, 2026: { days: 20, carryAuto: 0, used: 13, pending: 2 } } },
+  { id: 4, first: 'Tomasz', last: 'Zieliński', email: 't.zielinski@zbiks.pl', role: 'manager', state: 'active', y: { 2025: { days: 26, carryAuto: 3, used: 24, pending: 0 }, 2026: { days: 26, carryAuto: 3, carryOverride: 5, used: 16, pending: 1 } } },
+  { id: 5, first: 'Katarzyna', last: 'Lewandowska', email: 'k.lewandowska@zbiks.pl', role: 'employee', state: 'active', y: { 2025: { days: 26, carryAuto: 0, used: 23, pending: 0 }, 2026: { days: 26, carryAuto: 3, used: 20, pending: 3 } } },
+  { id: 6, first: 'Michał', last: 'Wójcik', email: 'michal.wojcik@zbiks.pl', role: 'employee', state: 'invited', invitedAt: '2026-11-20', y: { 2026: { days: 20, carryAuto: 0, used: 0, pending: 0 } } },
+];
+/* ===== koniec MOCK ===== */
+
+const $ = id => document.getElementById(id);
+let editing = null;
+const year = () => +$('year').value;
+const carryOf = a => a.carryOverride ?? a.carryAuto;
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const editBtn = (u, a) => `<button type="button" class="btn btn-ghost btn-sm" data-edit="${u.id}" ${a ? '' : 'disabled'}>Edytuj</button>`;
+
+function render() {
+  const y = year();
+  document.querySelectorAll('.y').forEach(e => (e.textContent = y));
+  $('no-year').hidden = !users.some(u => u.state !== 'invited' && !u.y[y]);
+  $('rows').innerHTML = users.map(u => {
+    const a = u.y[y];
+    const sub = u.state === 'invited' ? `<span class="invited">Zaproszony ${fmtNice(u.invitedAt)}, jeszcze nie założył konta</span>`
+      : u.state === 'disabled' ? '<span>Konto wyłączone</span>' : `<span>${ROLES[u.role]}</span>`;
+    const who = `<td><div class="who"><strong>${esc(u.first)} ${esc(u.last)}</strong>${sub}</div></td>`;
+    const act = u.state === 'invited' ? `<button type="button" class="btn btn-ghost btn-sm" data-resend="${u.id}">Wyślij ponownie</button>` : editBtn(u, a);
+    if (!a) return `<tr>${who}<td class="num muted" colspan="4">nie ustawiono</td><td>${act}</td></tr>`;
+    const carry = carryOf(a), left = a.days + carry - a.used - a.pending;
+    return `<tr class="${u.state === 'invited' ? 'is-invited' : ''}">${who}
+      <td class="num">${a.days}</td>
+      <td class="num">${carry}${a.carryOverride != null ? ' <span class="small muted">ręcznie</span>' : ''}</td>
+      <td class="num">${a.used}${a.pending ? ` + ${a.pending}` : ''}</td>
+      <td class="num left">${left}</td><td>${act}</td></tr>`;
+  }).join('');
+}
+
+function toast(t) { $('toast').textContent = t; $('toast').hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => ($('toast').hidden = true), 4000); }
+
+$('year').addEventListener('change', render);
+
+$('copy-year').addEventListener('click', () => {
+  const y = year();
+  // Docelowo: POST /api/admin/allowances/copy { from: y-1, to: y } — zaległy wylicza serwer
+  users.forEach(u => {
+    if (u.y[y]) return;
+    const prev = u.y[y - 1];
+    u.y[y] = { days: prev ? prev.days : 26, carryAuto: prev ? Math.max(0, prev.days + carryOf(prev) - prev.used - prev.pending) : 0, used: 0, pending: 0 };
+  });
+  render(); toast(`Ustawiono wymiar na ${y}. Zaległy urlop wyliczono z salda ${y - 1}.`);
+});
+
+$('invite-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const u = { id: Date.now(), first: $('i-first').value.trim(), last: $('i-last').value.trim(), email: $('i-email').value.trim(),
+              role: $('i-role').value, state: 'invited', invitedAt: todayIso(), y: {} };
+  const carry = +$('i-carry').value || 0;
+  u.y[year()] = { days: +e.target.dim.value, carryAuto: 0, carryOverride: carry || null, used: 0, pending: 0 };
+  // Docelowo: POST /api/admin/invitations
+  users.push(u); e.target.reset(); render(); toast(`Zaproszenie wysłane na ${u.email}.`);
+});
+
+$('rows').addEventListener('click', e => {
+  const ed = e.target.closest('[data-edit]'), rs = e.target.closest('[data-resend]');
+  if (rs) { const u = users.find(x => x.id == rs.dataset.resend); u.invitedAt = todayIso(); render(); toast(`Wysłano ponownie zaproszenie na ${u.email}.`); }
+  if (!ed) return;
+  editing = users.find(x => x.id == ed.dataset.edit);
+  const a = editing.y[year()];
+  $('e-title').textContent = `${editing.first} ${editing.last}`;
+  $('e-days').value = a.days;
+  $('e-role').value = editing.role;
+  $('e-override').checked = a.carryOverride != null;
+  $('e-carry').disabled = a.carryOverride == null;
+  $('e-carry').value = carryOf(a);
+  $('e-carry-hint').textContent = `Wyliczony automatycznie z ${year() - 1}: ${plDays(a.carryAuto)}.`;
+  $('e-active').checked = editing.state !== 'disabled';
+  $('edit-dlg').showModal();
+});
+$('e-override').addEventListener('change', e => { $('e-carry').disabled = !e.target.checked; if (!e.target.checked) $('e-carry').value = editing.y[year()].carryAuto; });
+$('e-reset').addEventListener('click', () => toast(`Wysłano link do zmiany hasła na ${editing.email}.`));
+$('edit-dlg').addEventListener('close', () => {
+  if ($('edit-dlg').returnValue !== 'ok' || !editing) return;
+  const a = editing.y[year()];
+  a.days = +$('e-days').value;
+  a.carryOverride = $('e-override').checked ? +$('e-carry').value : null;
+  editing.role = $('e-role').value;
+  editing.state = $('e-active').checked ? 'active' : 'disabled';
+  // Docelowo: PATCH /api/admin/users/:id oraz PUT /api/admin/allowances/:id/:year
+  render(); toast(`Zapisano zmiany: ${editing.first} ${editing.last}.`);
+  editing = null;
+});
+
+render();
+</script>
+</body>
+</html>
