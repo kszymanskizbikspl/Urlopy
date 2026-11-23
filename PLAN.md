@@ -4,9 +4,9 @@ Aplikacja webowa do składania i akceptowania wniosków urlopowych, uruchamiana 
 
 Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 
-## 0. Stan prac (23/11/2026)
+## 0. Stan prac (24/11/2026)
 
-| Krok (sekcja 9) | Stan | Commit |
+| Krok (sekcja 9, od 10 — sekcja 11) | Stan | Commit |
 |---|---|---|
 | 1. Szkielet Express, `public/`, migracje, Docker | ✅ zrobione | `c400ec7` |
 | 2. Logowanie, sesje, ochrona stron, pierwszy admin | ✅ zrobione | `c400ec7`, poprawki `464d88b` |
@@ -16,7 +16,15 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | `2467afa` |
 | 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ✅ zrobione | `6863499` |
 | 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ✅ zrobione | `bc75fa3` |
-| 8. Zadania automatyczne, log audytowy, kopie zapasowe | ✅ zrobione | — |
+| 8. Zadania automatyczne, log audytowy, kopie zapasowe | ✅ zrobione | `8790f77` |
+| **Etap 2** (sekcja 11) | | |
+| 10. Szybkie braki: zmiana hasła, edycja danych osoby, urlop wpisany przez admina, przypomnienie o czekających | ⬜ do zrobienia | — |
+| 11. Telefon (PWA) i dostęp z internetu (VPS + WireGuard + HTTPS) | ⬜ do zrobienia | — |
+| 12. Kalendarz zespołu, inne nieobecności (L4, delegacja…), okresy zablokowane | ⬜ do zrobienia | — |
+| 13. Kadry: wymiar proporcjonalny, eksport XLSX z miesiącami | ⬜ do zrobienia | — |
+| 14. Plan urlopów na rok | ⬜ do zrobienia | — |
+| 15. RODO: anonimizacja byłych pracowników po 3 latach | ⬜ do zrobienia | — |
+| 16. Keycloak: wdrożenie i logowanie kontem ZBIKS | ⬜ do zrobienia | — |
 
 **Strony — co działa na prawdziwych danych, a co jest jeszcze `MOCK`:**
 
@@ -318,7 +326,7 @@ Kopia zapasowa: ✅ robi ją sama aplikacja (krok 8) — codziennie od 2:00 spó
 
 - Aplikacja działa po HTTP pod adresem serwera w LAN. Hasła i ciasteczka idą po sieci firmowej bez szyfrowania — akceptowalne w zaufanej sieci; przeglądarka może oznaczać stronę jako „Niezabezpieczona”.
 - Opcjonalnie później: HTTPS w LAN (np. Caddy z certyfikatem z wewnętrznego CA) — ciasteczko dostanie wtedy `Secure` automatycznie.
-- **Wystawienie do internetu (później, nie teraz):** reverse proxy (Pangolin) z HTTPS, w `.env` `TRUST_PROXY` = dokładny adres proxy, port w compose tylko dla proxy (np. `127.0.0.1:1003:3000`), `APP_URL` = adres publiczny.
+- **Wystawienie do internetu (etap 2, krok 11):** VPS z domeną + tunel WireGuard do serwera firmowego, na VPS reverse proxy (Caddy) z HTTPS; w `.env` `TRUST_PROXY` = adres VPS w tunelu, `APP_URL` = adres publiczny; port 1003 tylko z LAN i z tunelu. Szczegóły w sekcji 11.
 
 ## 9. Kolejność prac
 
@@ -344,14 +352,61 @@ Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ====
 
 ## 10. Propozycje dodatkowych funkcji
 
-- **Zastępstwa i kolizje** (już w oknach): wybór zastępcy we wniosku, a przy akceptacji ostrzeżenie, gdy zastępca albo za dużo osób jest wtedy nieobecnych.
-- **Kalendarz zespołu**: widok miesiąca z nieobecnościami wszystkich. Przy nadzorach na kilku budowach łatwiej zaplanować obsadę odbiorów i rad budowy.
-- **Plan urlopów** na początku roku: pracownicy zaznaczają planowane terminy (art. 163 KP), admin widzi całość i zatwierdza plan zbiorczo.
-- **Okresy zablokowane**: admin oznacza terminy, w których urlop wymaga uzasadnienia (np. odbiory końcowe, termin złożenia oferty).
-- **Plik .ics / subskrypcja kalendarza**: zatwierdzone urlopy w kalendarzu telefonu, a zestaw nieobecności zespołu jako adres subskrypcji.
-- **Wniosek do podpisu (PDF)**: wydruk wniosku w formacie dla akt osobowych.
-- **Wymiar proporcjonalny**: kalkulator dla osób zatrudnionych w trakcie roku lub na część etatu (zaokrąglanie w górę do pełnego dnia, art. 154²).
-- **Eksport dla kadr/księgowości**: CSV jest (krok 7); można dodać XLSX i wykorzystanie urlopu w rozbiciu na miesiące.
+Przejrzane 24/11/2026 — wybrane przeszły do etapu 2 (sekcja 11), reszta odrzucona na razie.
+
+- **Zastępstwa i kolizje**: ✅ zrobione w kroku 6 (ostrzeżenia na karcie wniosku).
+- **Kalendarz zespołu**: → etap 2, krok 12.
+- **Plan urlopów** na początku roku (art. 163 KP): → etap 2, krok 14.
+- **Okresy zablokowane** (np. odbiory końcowe, termin oferty): → etap 2, krok 12.
+- **Plik .ics przy decyzji**: ✅ zrobione w kroku 6. **Subskrypcja kalendarza** (adres .ics): ✗ odrzucona.
+- **Wniosek do podpisu (PDF)**: ✗ odrzucony.
+- **Wymiar proporcjonalny**: → etap 2, krok 13.
+- **Eksport dla kadr**: CSV ✅ (krok 7); XLSX z rozbiciem na miesiące → etap 2, krok 13.
 - **Log zmian**: ✅ zrobione w kroku 8 (Ustawienia → Log zdarzeń).
-- **Dostęp z internetu** przez Pangolin (sekcja 8a), np. żeby składać wnioski z budowy.
-- **Link w portalu narzędzi ZBIKS** do aplikacji. Później można rozważyć logowanie przez Keycloak (OIDC) jako drugą opcję, zostawiając własne logowanie e-mailem.
+- **Dostęp z internetu**: → etap 2, krok 11 — **przez VPS + WireGuard** zamiast Pangolina.
+- **Logowanie przez Keycloak (OIDC)**: → etap 2, krok 16 (Keycloak do wdrożenia). Link w portalu narzędzi ZBIKS — przy okazji.
+- **2FA** (kod z aplikacji przy logowaniu z internetu): ✗ odrzucone — dostęp z internetu dla wszystkich bez 2FA.
+
+## 11. Etap 2 — kolejne funkcje
+
+Funkcje wybrane 24/11/2026 (pytanie po pytaniu). Robione po jednym kroku, jak w etapie 1: kod → testy (`node --test` w Dockerze) → test dymny stron w jsdom → `/code-review` → aktualizacja PLAN.md → commit.
+
+**Decyzje:**
+- Internet: jest VPS z publicznym IP i domena; dostęp z internetu mają **wszyscy**, bez 2FA.
+- Keycloak: nie ma — **do wdrożenia** (osobny kontener).
+- Okresy zablokowane: wniosek w takim terminie **wymaga uzasadnienia**.
+- Inne nieobecności (L4, delegacja, szkolenie, praca zdalna): **wszystko wpisuje admin**.
+- Plan roczny: **termin + zatwierdzanie**, z pozycji planu „złóż wniosek” jednym kliknięciem.
+- RODO: anonimizacja byłych pracowników **po 3 latach** od wyłączenia konta.
+- Kolejność: najpierw szybkie braki (krok 10), Keycloak na końcu (krok 16).
+
+10. ⬜ **Szybkie braki.**
+    - **Zmiana hasła po zalogowaniu** — karta „Moje konto” w `panel.html` (`autocomplete` current-password / new-password + ukryte `username`); `POST /api/me/password { current, password, logout_others }`: `verifyPassword`, `passwordProblem`, `hashPassword` (`src/auth.js`), `sessionStore.destroyUser(id, bieżąca sesja)`, e-mail „hasło zmienione” (`accounts.notifyPasswordChanged`), audit, limit prób na osobę.
+    - **Edycja danych osoby** — `PATCH /api/admin/users/:id` także `first_name`, `last_name`, `email` (walidacja jak przy zaproszeniu, zajęty e-mail → 409); dozwolone też dla zaproszonych (zmiana e-maila zaproszonego = nowe zaproszenie); przy zmianie e-maila aktywnej osoby powiadomienie na stary adres. „Edytuj” w `admin-pracownicy.html`: pola imię / nazwisko / e-mail, także przy zaproszonych.
+    - **Urlop wpisany przez admina** — `POST /api/admin/requests { user_id, date_from, date_to, type, substitute_id, note }`: w jednej transakcji ta sama walidacja co wniosek (`leave.createRequest`) + zatwierdzenie (decyzja admina, uwaga „wpisany przez administratora”), e-mail z decyzją i `.ics`. Nie dla własnego konta. Przycisk „Dodaj urlop za pracownika” w `admin-wnioski.html`.
+    - **Przypomnienie o czekających** — zadanie `pending_reminder` w `src/jobs.js` (dni robocze od 8:00, raz dziennie): każdy przełożony dostaje jeden e-mail z wnioskami / prośbami o anulowanie czekającymi ≥ 2 dni robocze albo z terminem za ≤ 3 dni. Ustawienie `pending_reminder` w Zasadach (domyślnie włączone).
+11. ⬜ **Telefon i dostęp z internetu.**
+    - **Wygoda na telefonie** — przegląd stron przy 360 px (menu, tabele, kalendarz jednomiesięczny na wąskim ekranie); PWA: `manifest.webmanifest`, kwadratowa ikona, prosty service worker bez cache’owania API; CSP (`manifest-src`, `worker-src`). Instalacja na telefonie działa dopiero po HTTPS.
+    - **Dostęp z internetu przez VPS + WireGuard** — szablony w `deploy/` i opis w `WDROZENIE.md`: tunel WireGuard VPS `10.99.0.1` ↔ serwer firmowy `10.99.0.2` (serwer łączy się do VPS, `PersistentKeepalive = 25`, działa zza NAT); na VPS Caddy `urlopy.<domena> → 10.99.0.2:1003` z automatycznym HTTPS i HSTS; `.env`: `TRUST_PROXY=10.99.0.1`, `APP_URL=https://urlopy.<domena>`; zapora serwera: port 1003 tylko z LAN i z tunelu. Sprawdzić: ciasteczko `Secure` przez HTTPS, limit prób po prawdziwym IP, `sameOrigin` z domeną, dostęp z LAN nadal działa. Sekcja 8a do aktualizacji.
+12. ⬜ **Kalendarz zespołu, inne nieobecności, okresy zablokowane.**
+    - **Inne nieobecności** — tabela `absences` (osoba, rodzaj: L4 / delegacja / szkolenie / praca zdalna, od–do, uwagi, kto wpisał); `GET/POST/DELETE /api/admin/absences`; nie zmniejszają puli; widoczne w liście nieobecnych, ostrzeżeniach o kolizjach, „kto ma wtedy urlop” i kalendarzu zespołu. **L4 to dane o zdrowiu — rodzaj widzi tylko admin**, inni widzą „nieobecny”. L4 nachodzące na zatwierdzony urlop → ostrzeżenie dla admina (art. 166 KP: urlop się przerywa, korekta przez anulowanie / nowy wniosek).
+    - **Okresy zablokowane** — tabela `blocked_periods` (od–do, nazwa), edycja w Ustawieniach. Wniosek wypoczynkowy lub bezpłatny nachodzący na okres wymaga uzasadnienia (nowa kolumna we wnioskach; bez niego 409 z kodem `blocked`); na żądanie, okolicznościowy, opieka i siła wyższa — bez blokady (prawo). Panel: ostrzeżenie + pole „Uzasadnienie”, dni oznaczone w kalendarzu; karta u przełożonego: czerwone ostrzeżenie z nazwą okresu i uzasadnieniem.
+    - **Kalendarz zespołu** — nowa strona `kalendarz.html` (link w menu): miesiąc jako tabela osoby × dni — zatwierdzone urlopy, czekające (tylko przełożeni / admini), inne nieobecności, święta, weekendy, dni wolne, okresy zablokowane; filtr „mój zespół” dla przełożonych. `GET /api/team-calendar?month=RRRR-MM`; pracownik widzi tylko zatwierdzone i tylko przy włączonym „Pokazuj, kto ma urlop”.
+13. ⬜ **Kadry.**
+    - **Wymiar proporcjonalny** — kalkulator przy zaproszeniu i w „Edytuj”: pełny wymiar (20 / 26), etat, data zatrudnienia / zakończenia w roku, „pierwsza praca” (art. 153 § 1: 1/12 z 20 dni po każdym miesiącu); zaokrąglenie w górę do pełnego dnia (art. 154², 155¹) z wyjaśnieniem; wynik trafia do pola „Wymiar”, admin zatwierdza. Logika w `public/js/` (testowana w Node).
+    - **Eksport XLSX** — zależność `exceljs`; `GET /api/admin/export?kind=xlsx&year=`: arkusze Podsumowanie, Wnioski, **Wykorzystanie w miesiącach** (dni robocze każdej osoby w każdym miesiącu), Inne nieobecności. CSV zostaje.
+14. ⬜ **Plan urlopów na rok.**
+    - Tabele planu (rok + termin, pozycje planu osoby, stan planu osoby: szkic / wysłany / zatwierdzony / zwrócony z uwagą).
+    - Admin otwiera plan na rok z terminem (np. do 31 stycznia) → e-mail do wszystkich; 7 dni przed terminem przypomnienie do osób bez wysłanego planu.
+    - Pracownik: zakładka „Plan urlopów” w panelu — zaznacza terminy w kalendarzu, widzi sumę względem puli, „Wyślij plan”. Przełożony (ten sam routing co wnioski) zatwierdza albo zwraca z uwagą — zakładka „Plany” na stronie „Wnioski”.
+    - Plan nie zmniejsza puli; przy pozycji planu „Złóż wniosek” (wypełnia formularz); 14 dni przed zaplanowanym urlopem e-mail „złóż wniosek”. Kalendarz zespołu pokazuje plan jaśniejszym kolorem.
+15. ⬜ **RODO: byli pracownicy.**
+    - Kolumna `users.disabled_at` (ustawiana przy wyłączeniu konta; dla już wyłączonych — data migracji).
+    - Zadanie codzienne: konta wyłączone ≥ 3 lata → anonimizacja (imię i nazwisko „Były pracownik #id”, e-mail `usuniety-<id>@invalid`, bez hasła, usunięte tokeny i sesje, wyczyszczone uwagi i uzasadnienia we wnioskach; wnioski zostają do statystyk). Log zdarzeń starszy niż 3 lata kasowany. Przycisk „Anonimizuj teraz” przy wyłączonym koncie.
+    - Ostrzeżenie w aplikacji: to nie oficjalna dokumentacja pracownicza (ta jest w kadrach, 10 lat) — przed anonimizacją kadry powinny mieć eksport.
+16. ⬜ **Keycloak: wdrożenie i logowanie kontem ZBIKS.**
+    - `deploy/keycloak/`: Keycloak + Postgres (osobny compose), za tym samym Caddy na VPS (`auth.<domena>`, HTTPS); realm `zbiks`, klient `urlopy` (confidential, standard flow, PKCE).
+    - Aplikacja: zależność `openid-client`; w `.env` `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (bez nich przycisk ukryty); przycisk „Zaloguj przez konto ZBIKS” na stronie logowania; state + nonce + PKCE w sesji, `email_verified`, dopasowanie po adresie e-mail do istniejącego konta. Konta nadal tylko z zaproszenia (zaproszony może aktywować konto przez Keycloak). Logowanie e-mailem i hasłem zostaje.
+    - Testy z atrapą dostawcy OIDC (bez prawdziwego Keycloaka).
+
+**Weryfikacja każdego kroku:** testy w Dockerze (`docker-compose.test.yml`), test dymny stron w jsdom bez błędów JS, lokalny kontener z Mailpit, `/code-review`. Krok 11: test przez prawdziwy VPS (HTTPS, logowanie z telefonu spoza sieci firmy). Krok 16: logowanie przez Keycloak na serwerze.
