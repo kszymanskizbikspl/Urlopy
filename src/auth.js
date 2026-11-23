@@ -2,7 +2,7 @@
 const crypto = require('node:crypto');
 const argon2 = require('argon2');
 const db = require('./db');
-const { APP_HOST } = require('./config');
+const { APP_HOST, TRUST_PROXY } = require('./config');
 
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 256;            // górna granica chroni przed bardzo długim haszowaniem
@@ -35,13 +35,16 @@ const getUser = db.prepare('SELECT id, email, first_name, last_name, role, manag
 /** Logowanie: nowy identyfikator sesji (ochrona przed przejęciem sesji), token CSRF, czas życia ciasteczka. */
 function startSession(req, user, remember) {
   return new Promise((resolve, reject) => {
-    req.session.regenerate(err => {
+    const fill = err => {
       if (err) return reject(err);
       req.session.userId = user.id;
       req.session.csrf = crypto.randomBytes(24).toString('base64url');
       req.session.cookie.maxAge = remember ? REMEMBER_MS : null; // null = ciasteczko do zamknięcia przeglądarki
       req.session.save(e => (e ? reject(e) : resolve()));
-    });
+    };
+    // loadUser mógł już usunąć nieważną sesję (np. zablokowane konto w tej przeglądarce) — wtedy zakładamy nową
+    if (req.session) req.session.regenerate(fill);
+    else { req.sessionStore.generate(req); fill(); }
   });
 }
 
@@ -58,10 +61,12 @@ function loadUser(req, res, next) {
 // ---------- ochrona ----------
 const ALL_ROLES = ['employee', 'manager', 'admin'];
 
-/** API: 401 bez logowania, 403 przy braku uprawnień */
+/** API: 401 bez logowania, 403 przy braku uprawnień, a dla zmian danych także zły token CSRF.
+    Sprawdzane na konkretnych trasach — nieznany adres API daje 404, nie mylący błąd sesji. */
 const requireApi = (roles = ALL_ROLES) => (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Zaloguj się ponownie.' });
   if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'Brak uprawnień.' });
+  if (!csrfOk(req)) return res.status(403).json({ error: 'Sesja wygasła. Odśwież stronę.' });
   next();
 };
 
@@ -102,23 +107,23 @@ function sameOrigin(req, res, next) {
   if (!source) return next(); // klient spoza przeglądarki; ciasteczko SameSite=Lax i tak nie przyjdzie z obcej strony
   let host;
   try { host = new URL(source).host; } catch { host = null; }
-  const allowed = [APP_HOST, req.get('x-forwarded-host'), req.get('host')];
+  // X-Forwarded-Host tylko za zaufanym proxy; w LAN porównujemy z Host i APP_URL
+  const allowed = [APP_HOST, req.get('host'), TRUST_PROXY ? req.get('x-forwarded-host') : null].filter(Boolean);
   if (host && allowed.includes(host)) return next();
   res.status(403).type('text').send('Żądanie z innej strony zostało zablokowane.');
 }
 
 /** API zmieniające dane: nagłówek X-CSRF-Token musi pasować do sesji */
-function csrfApi(req, res, next) {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+function csrfOk(req) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true;
   const sent = Buffer.from(String(req.get('x-csrf-token') || ''));
   const expected = Buffer.from(String((req.session && req.session.csrf) || ''));
-  if (expected.length && sent.length === expected.length && crypto.timingSafeEqual(sent, expected)) return next();
-  res.status(403).json({ error: 'Sesja wygasła. Odśwież stronę.' });
+  return expected.length > 0 && sent.length === expected.length && crypto.timingSafeEqual(sent, expected);
 }
 
 module.exports = {
   MIN_PASSWORD, MAX_PASSWORD,
   hashPassword, verifyPassword, passwordProblem,
   getUser, startSession, loadUser,
-  requireApi, protectPages, sameOrigin, csrfApi, safeNext,
+  requireApi, protectPages, sameOrigin, safeNext,
 };

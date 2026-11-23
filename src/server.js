@@ -6,7 +6,7 @@ const session = require('express-session');
 const config = require('./config');
 const db = require('./db');
 const SqliteSessionStore = require('./session-store');
-const { loadUser, protectPages, sameOrigin, csrfApi } = require('./auth');
+const { loadUser, protectPages, sameOrigin } = require('./auth');
 const authRoutes = require('./routes/auth');
 const meRoutes = require('./routes/me');
 const { ensureFirstAdmin } = require('./bootstrap');
@@ -15,7 +15,8 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1); // za reverse proxy (Pangolin): poprawne req.ip i req.secure
+// LAN bez proxy: nagłówki X-Forwarded-* ignorowane (TRUST_PROXY puste). Przy proxy: tylko od jego adresu.
+app.set('trust proxy', config.TRUST_PROXY);
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -26,9 +27,12 @@ app.use(helmet({
       'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src': ["'self'", 'data:'],
       'form-action': ["'self'"],
-      'upgrade-insecure-requests': null, // HTTPS wymusza proxy; lokalnie działa po http
+      'upgrade-insecure-requests': null, // w LAN aplikacja działa po HTTP
     },
   },
+  strictTransportSecurity: false,       // HSTS tylko przy HTTPS — włączyć razem z proxy/certyfikatem
+  crossOriginOpenerPolicy: false,       // po HTTP na adresie IP przeglądarka i tak go ignoruje (z ostrzeżeniem)
+  originAgentCluster: false,
   // same-origin zamiast no-referrer: przy no-referrer przeglądarka wysyła „Origin: null” w formularzach POST
   referrerPolicy: { policy: 'same-origin' },
 }));
@@ -66,7 +70,6 @@ app.use(loadUser);
 app.get('/', (req, res) => res.redirect(302, req.user ? '/panel.html' : '/login.html'));
 app.use(authRoutes);
 
-app.use('/api', csrfApi);
 app.use('/api/me', meRoutes);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nie znaleziono' }));
 

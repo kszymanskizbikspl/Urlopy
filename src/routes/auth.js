@@ -30,7 +30,20 @@ const loginLimitEmail = rateLimit({
   limit: 10,
   keyGenerator: req => 'email:' + String((req.body && req.body.email) || '').trim().toLowerCase(),
 });
-const linkLimit = rateLimit({ windowMs: WINDOW, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+// Linki z zaproszeń: osobne liczniki dla podglądu i wysłania formularza, z zapasem na całe biuro za jednym IP.
+// Tokeny mają 256 bitów — limit chroni tylko przed zalewaniem serwera, nie przed zgadywaniem.
+const linkLimitOpts = { windowMs: WINDOW, standardHeaders: 'draft-8', legacyHeaders: false };
+const inviteLimit = rateLimit({
+  ...linkLimitOpts,
+  limit: 200,
+  handler: (req, res) => res.status(429).json({ error: 'Zbyt wiele prób. Spróbuj ponownie za kilka minut.' }),
+});
+const registerLimit = rateLimit({
+  ...linkLimitOpts,
+  limit: 100,
+  handler: (req, res) => res.redirect(303,
+    `/rejestracja.html?token=${encodeURIComponent(String((req.body && req.body.token) || ''))}&error=limit`),
+});
 
 // ---------- logowanie ----------
 const findByEmail = db.prepare('SELECT id, password_hash, state FROM users WHERE email = ?');
@@ -75,7 +88,7 @@ const allowanceFrom = db.prepare('SELECT year, days FROM allowances WHERE user_i
 const invalidInvite = t => !t || t.state !== 'invited';
 
 // Dane do strony rejestracji (e-mail, imię, wymiar, kto zaprosił)
-router.get('/api/invite', linkLimit, (req, res) => {
+router.get('/api/invite', inviteLimit, (req, res) => {
   const t = findToken(req.query.token, 'invite');
   if (invalidInvite(t)) return res.status(410).json({ error: 'Link wygasł albo został już użyty.' });
   const allowance = allowanceFrom.get(t.id, new Date().getFullYear());
@@ -93,7 +106,7 @@ router.get('/api/invite', linkLimit, (req, res) => {
 const cleanName = v => String(v || '').trim().replace(/\s+/g, ' ').slice(0, 60);
 const activate = db.prepare("UPDATE users SET first_name = ?, last_name = ?, password_hash = ?, state = 'active' WHERE id = ? AND state = 'invited'");
 
-router.post('/rejestracja', linkLimit, async (req, res, next) => {
+router.post('/rejestracja', registerLimit, async (req, res, next) => {
   try {
     const body = req.body || {};
     const token = String(body.token || '');
@@ -104,6 +117,7 @@ router.post('/rejestracja', linkLimit, async (req, res, next) => {
     const first = cleanName(body.first_name), last = cleanName(body.last_name);
     const password = String(body.password || '');
     if (!first || !last) return back('name');
+    if (password.length > MAX_PASSWORD) return back('password_long');
     if (passwordProblem(password)) return back('password');
     if (body.password_confirm !== undefined && body.password_confirm !== password) return back('mismatch');
 

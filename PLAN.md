@@ -1,6 +1,6 @@
 # Urlopy ZBIKS — plan aplikacji
 
-Aplikacja webowa do składania i akceptowania wniosków urlopowych, uruchamiana jako kontener Docker na serwerze firmowym. Ten pakiet zawiera gotowe okna HTML (`public/`) z danymi przykładowymi (bloki oznaczone `MOCK`) oraz plan backendu do zrobienia w VS Code.
+Aplikacja webowa do składania i akceptowania wniosków urlopowych, uruchamiana jako kontener Docker na serwerze firmowym. **Na razie dostępna tylko w sieci LAN firmy** (bez reverse proxy i bez dostępu z internetu — patrz sekcja 8a). Ten pakiet zawiera gotowe okna HTML (`public/`) z danymi przykładowymi (bloki oznaczone `MOCK`) oraz plan backendu do zrobienia w VS Code.
 
 ## 1. Stos technologiczny (propozycja)
 
@@ -124,9 +124,10 @@ Zasady oparte na Kodeksie pracy; warto potwierdzić szczegóły (np. wymiar dla 
 - Formularz logowania: `type="email" autocomplete="username"` i `type="password" autocomplete="current-password"`, zwykły POST na `/login`, po sukcesie 303 na `/panel.html`. Nie blokować wklejania.
 - Rejestracja i reset: pole e-mail widoczne (readonly lub hidden z `autocomplete="username"`) i `autocomplete="new-password"` — przeglądarka zaproponuje silne hasło i zapisze je pod właściwym loginem.
 - Pola SMTP w ustawieniach mają `autocomplete="off"/"new-password"`, żeby przeglądarka nie wstawiała tam hasła admina.
-- „Zapamiętaj mnie”: ciasteczko sesji `httpOnly; Secure; SameSite=Lax`, `maxAge` 30 dni gdy zaznaczone, w przeciwnym razie ciasteczko sesyjne. Po zmianie hasła usunąć wszystkie sesje użytkownika.
+- „Zapamiętaj mnie”: ciasteczko sesji `httpOnly; SameSite=Lax` (+ `Secure` automatycznie, gdy strona działa po HTTPS), `maxAge` 30 dni gdy zaznaczone, w przeciwnym razie ciasteczko sesyjne. Po zmianie hasła usunąć wszystkie sesje użytkownika.
 - Limit prób: 10 nieudanych logowań na 15 min na e-mail i 50 na IP (całe biuro może mieć jedno publiczne IP). Ten sam komunikat błędu niezależnie od tego, czy konto istnieje.
-- Hasło min. 8 znaków. Aplikacja stoi za reverse proxy (Pangolin), więc `app.set('trust proxy', 1)` i HTTPS po stronie proxy.
+- Hasło min. 8 znaków.
+- Tylko LAN, bez proxy: `trust proxy` wyłączone — serwer nie ufa nagłówkom `X-Forwarded-*`, więc nikt nie podrobi swojego IP, żeby obejść limit prób. Włącza się je zmienną `TRUST_PROXY` dopiero przy wystawieniu przez proxy (sekcja 8a).
 - Ochrona stron: middleware `requireLogin` przekierowuje na `/login.html`; strony `admin-*.html` i `/api/admin/*` tylko dla `manager`/`admin` (Ustawienia i Pracownicy tylko `admin`).
 
 ## 6. Poczta (SMTP)
@@ -195,7 +196,7 @@ services:
   urlopy:
     build: .
     restart: unless-stopped
-    ports: ["1003:3000"]            # port do ustalenia (mapa360 używa 1002)
+    ports: ["1003:3000"]            # port do ustalenia (mapa360 używa 1002); dostęp z LAN
     env_file: .env                  # SESSION_SECRET, SETTINGS_KEY, APP_URL, ADMIN_EMAIL
     volumes: ["./data:/app/data"]   # urlopy.sqlite + sesje
 ```
@@ -204,7 +205,15 @@ services:
 
 Pierwsze uruchomienie: jeśli w bazie nie ma admina, serwer tworzy zaproszenie dla `ADMIN_EMAIL` i wypisuje link w logach kontenera (działa nawet bez skonfigurowanego SMTP).
 
+`APP_URL` to adres serwera w LAN, np. `http://192.168.88.X:1003` albo nazwa z firmowego DNS. Ten adres trafia do linków w e-mailach (zaproszenie, reset hasła), więc linki działają tylko z komputerów w sieci firmy.
+
 Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlopy-$(date +%F).sqlite"` z hosta (cron), trzymać np. 30 dni.
+
+## 8a. Sieć: tylko LAN
+
+- Aplikacja działa po HTTP pod adresem serwera w LAN. Hasła i ciasteczka idą po sieci firmowej bez szyfrowania — akceptowalne w zaufanej sieci; przeglądarka może oznaczać stronę jako „Niezabezpieczona”.
+- Opcjonalnie później: HTTPS w LAN (np. Caddy z certyfikatem z wewnętrznego CA) — ciasteczko dostanie wtedy `Secure` automatycznie.
+- **Wystawienie do internetu (później, nie teraz):** reverse proxy (Pangolin) z HTTPS, w `.env` `TRUST_PROXY` = dokładny adres proxy, port w compose tylko dla proxy (np. `127.0.0.1:1003:3000`), `APP_URL` = adres publiczny.
 
 ## 9. Kolejność prac
 
@@ -230,4 +239,5 @@ Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ====
 - **Wymiar proporcjonalny**: kalkulator dla osób zatrudnionych w trakcie roku lub na część etatu (zaokrąglanie w górę do pełnego dnia, art. 154²).
 - **Eksport dla kadr/księgowości** (CSV/XLSX) z wykorzystaniem urlopu w miesiącu.
 - **Log zmian**: kto zmienił wymiar, kto zatwierdził wniosek, kiedy (już w modelu danych jako `audit_log`).
+- **Dostęp z internetu** przez Pangolin (sekcja 8a), np. żeby składać wnioski z budowy.
 - **Link w portalu narzędzi ZBIKS** do aplikacji. Później można rozważyć logowanie przez Keycloak (OIDC) jako drugą opcję, zostawiając własne logowanie e-mailem.

@@ -69,8 +69,11 @@
   const SERVER_ERR = {
     name: 'Wpisz imię i nazwisko.',
     password: 'Hasło musi mieć co najmniej 8 znaków.',
+    password_long: 'Hasło może mieć najwyżej 256 znaków.',
     mismatch: 'Hasła się różnią. Wpisz je jeszcze raz.',
+    limit: 'Zbyt wiele prób z tej sieci. Spróbuj ponownie za kilka minut.',
   };
+  function showError(msg) { $('form-error').textContent = msg; $('form-error').hidden = !msg; }
   const token = p.get('token') || '';
   $('token').value = token;
 
@@ -81,9 +84,17 @@
 
   if (p.has('expired') || !token) linkBroken();
   else {
+    if (SERVER_ERR[p.get('error')]) showError(SERVER_ERR[p.get('error')]);
     fetch('/api/invite?token=' + encodeURIComponent(token), { headers: { Accept: 'application/json' } })
-      .then(r => (r.ok ? r.json() : Promise.reject(r)))
+      .then(r => {
+        if (r.ok) return r.json();
+        if (r.status === 410) linkBroken();          // tylko 410 = link wygasł albo został użyty
+        else if (r.status === 429) showError(SERVER_ERR.limit);
+        else showError('Nie udało się wczytać zaproszenia. Odśwież stronę za chwilę.');
+        return null;
+      }, () => { showError('Brak połączenia z serwerem. Odśwież stronę za chwilę.'); return null; })
       .then(inv => {
+        if (!inv) return;
         $('email').value = inv.email;
         if (!$('first').value) $('first').value = inv.first_name || '';
         if (!$('last').value) $('last').value = inv.last_name || '';
@@ -91,9 +102,7 @@
         const until = new Date(inv.expires_at);
         $('invite-info').textContent = (inv.invited_by ? `Zaproszenie od: ${inv.invited_by}, ważne` : 'Zaproszenie ważne')
           + ` do ${until.getDate()} ${MONTHS[until.getMonth()]}.`;
-      })
-      .catch(linkBroken);
-    if (SERVER_ERR[p.get('error')]) { $('form-error').textContent = SERVER_ERR[p.get('error')]; $('form-error').hidden = false; }
+      });
   }
 
   document.getElementById('reg-form').addEventListener('submit', e => {
@@ -101,7 +110,8 @@
     const err = document.getElementById('form-error');
     let msg = '';
     if (!v('first').trim() || !v('last').trim()) msg = 'Wpisz imię i nazwisko.';
-    else if (v('pw').length < 8) msg = 'Hasło musi mieć co najmniej 8 znaków.';
+    else if (v('pw').length < 8) msg = SERVER_ERR.password;
+    else if (v('pw').length > 256) msg = SERVER_ERR.password_long;
     else if (v('pw') !== v('pw2')) msg = 'Hasła się różnią. Wpisz je jeszcze raz.';
     err.textContent = msg; err.hidden = !msg;
     if (msg) e.preventDefault();

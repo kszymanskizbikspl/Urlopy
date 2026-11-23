@@ -17,4 +17,13 @@ try { APP_HOST = new URL(APP_URL).host; } catch { throw new Error(`Nieprawidłow
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 
-module.exports = { PORT, isProd, SESSION_SECRET, APP_URL, APP_HOST, ADMIN_EMAIL };
+// Od kogo przyjmować X-Forwarded-For / X-Forwarded-Proto (składnia Express „trust proxy”).
+// Domyślnie nikt — aplikacja działa w LAN bez proxy, a nagłówki od klientów są ignorowane (nie da się podrobić IP).
+// Przy wystawieniu przez proxy: dokładny adres proxy, np. TRUST_PROXY=172.18.0.5 (PLAN.md, sekcja 8a).
+const TRUST_PROXY = (() => {
+  const v = (process.env.TRUST_PROXY || '').trim();
+  if (!v || v === 'false') return false;
+  return /^\d+$/.test(v) ? Number(v) : v;
+})();
+
+module.exports = { PORT, isProd, SESSION_SECRET, APP_URL, APP_HOST, ADMIN_EMAIL, TRUST_PROXY };

@@ -4,6 +4,8 @@ services:
     image: urlopy-zbiks
     container_name: urlopy
     restart: unless-stopped
-    ports: ["1003:3000"]            # port do ustalenia (mapa360 używa 1002)
+    # Dostęp z LAN: http://<IP serwera>:1003 (port do ustalenia, mapa360 używa 1002).
+    # Przy wystawieniu przez proxy na tym samym hoście: "127.0.0.1:1003:3000" (PLAN.md, sekcja 8a).
+    ports: ["1003:3000"]
     env_file: .env                  # SESSION_SECRET, SETTINGS_KEY, APP_URL, ADMIN_EMAIL
     volumes: ["./data:/app/data"]   # urlopy.sqlite + sesje; katalog musi należeć do UID 1000
