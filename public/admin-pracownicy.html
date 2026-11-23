@@ -38,9 +38,15 @@
       <h1>Pracownicy</h1>
       <p class="lead">Niewykorzystany urlop przechodzi na następny rok sam. Możesz go poprawić ręcznie przy edycji osoby.</p>
     </div>
-    <div class="field">
-      <label for="year">Rok</label>
-      <select id="year" style="min-width: 120px"></select>
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+      <div class="field">
+        <label for="year">Rok</label>
+        <select id="year" style="min-width: 120px"></select>
+      </div>
+      <!-- Eksport dla kadr: CSV (średnik, UTF-8) — otwiera się w Excelu; rok jak na liście -->
+      <!-- href ustawia skrypt od razu po wypełnieniu listy lat (bez href="#", który pobrałby tę stronę) -->
+      <a class="btn btn-ghost btn-sm" id="exp-summary" download>Pobierz CSV: podsumowanie</a>
+      <a class="btn btn-ghost btn-sm" id="exp-requests" download>CSV: zatwierdzone wnioski</a>
     </div>
   </div>
 
@@ -145,11 +151,19 @@ const beforeFirst = (u, y) => u.firstYear != null && y < u.firstYear;
 // Ten sam warunek co `missing` w POST /api/admin/allowances/copy: aktywne konto, brak wymiaru, który da się ustawić
 const needsAllowance = (u, y) => u.state === 'active' && !u.y[y] && !beforeFirst(u, y);
 
+/** Eksport CSV dla roku wybranego na liście (działa także, gdy lista jeszcze się wczytuje) */
+function setExportLinks() {
+  $('exp-summary').href = `/api/admin/export?kind=summary&year=${year()}`;
+  $('exp-requests').href = `/api/admin/export?kind=requests&year=${year()}`;
+}
+
 // Lata do wyboru: poprzedni, bieżący, następny
 (() => {
   const y = new Date().getFullYear();
   $('year').innerHTML = [y - 1, y, y + 1].map(v => `<option${v === y ? ' selected' : ''}>${v}</option>`).join('');
+  setExportLinks();
 })();
+$('year').addEventListener('change', setExportLinks);
 
 /** GET /api/admin/users?year= — lista z saldem na wybrany rok */
 async function load() {
@@ -171,6 +185,7 @@ async function load() {
 function render() {
   const y = year();
   document.querySelectorAll('.y').forEach(e => (e.textContent = y));
+  setExportLinks();
   $('inv-year').textContent = inviteYear();
   $('no-year').hidden = !users.some(u => needsAllowance(u, y));
   $('rows').innerHTML = users.map(u => {

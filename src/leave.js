@@ -189,7 +189,35 @@ const createRequest = db.transaction((userId, input, { isActiveUser }) => {
   return { id, ...row, status: 'pending' };
 });
 
+// ---------- przeliczanie po zmianie dni wolnych w firmie (krok 7) ----------
+// Czekające i zatwierdzone, które się jeszcze nie skończyły. Zakończonych nie zmieniamy — to rozliczona historia.
+const recalcQ = db.prepare(`
+  SELECT r.id, r.user_id, r.date_from, r.date_to, r.days, r.status, trim(u.first_name || ' ' || u.last_name) AS employee
+  FROM leave_requests r JOIN users u ON u.id = r.user_id
+  WHERE substr(r.date_from, 1, 4) = ?
+    AND (r.status = 'pending' OR (r.status IN ('approved', 'cancel_requested') AND r.date_to >= ?))
+  ORDER BY r.date_from, r.id`);
+const setDays = db.prepare('UPDATE leave_requests SET days = ? WHERE id = ?');
+
+/** Osoby z wnioskami, które recalcYear(year) może zmienić (do zapamiętania sald przed zmianą) */
+const recalcUsers = year => [...new Set(recalcQ.all(String(year), today()).map(r => r.user_id))];
+
+/** Przelicza dni robocze we wnioskach roku `year` (wywoływać w transakcji, po zmianie company_days_off).
+    Zwraca zmienione wnioski: [{ id, user_id, employee, date_from, date_to, status, old, days }] */
+function recalcYear(year) {
+  const changed = [];
+  for (const r of recalcQ.all(String(year), today())) {
+    const days = workingDays(r.date_from, r.date_to);
+    if (days !== r.days) {
+      setDays.run(days, r.id);
+      changed.push({ id: r.id, user_id: r.user_id, employee: r.employee, date_from: r.date_from, date_to: r.date_to, status: r.status, old: r.days, days });
+    }
+  }
+  return changed;
+}
+
 module.exports = {
+  recalcYear, recalcUsers,
   balance, carryAuto, firstYear, safeLeft, leftWith,
   TYPES, TYPE_LABELS, POOL, LIMITS, companyDaysOff, workingDays, typeUsage, today, isIsoDate, createRequest, RequestError,
 };

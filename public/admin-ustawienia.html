@@ -93,15 +93,16 @@
         <h2 class="card-title" id="off-h">Dni wolne w firmie</h2>
         <p class="small muted">Za święto w sobotę trzeba wyznaczyć inny dzień wolny (art. 130 § 2 KP). Te dni nie zmniejszają puli urlopu.</p>
       </div>
-      <div><label for="o-year" class="sr-only">Rok</label><select id="o-year" style="width: auto"><option>2026</option><option>2027</option></select></div>
+      <div><label for="o-year" class="sr-only">Rok</label><select id="o-year" style="width: auto"></select></div>
     </div>
     <div class="dayoff-list" id="sat-list"></div>
     <h3 class="label">Inne dni wolne</h3>
     <div class="dayoff-list" id="extra-list"></div>
     <p class="msg msg-ok" id="off-msg" role="status" hidden></p>
+    <ul class="small" id="off-changed" hidden></ul>
     <div class="card-foot" style="justify-content: space-between">
       <button type="button" class="btn btn-dashed" id="add-extra">Dodaj inny dzień wolny</button>
-      <button class="btn">Zapisz dni wolne</button>
+      <button class="btn" id="off-save">Zapisz dni wolne</button>
     </div>
   </form>
 </main>
@@ -115,12 +116,12 @@
 const $ = id => document.getElementById(id);
 const WD = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
 
-/* ===== MOCK — docelowo GET/PUT /api/admin/days-off/:year (krok 7) ===== */
-const daysOff = {
-  2026: { replacements: { '2026-08-15': '2026-11-10', '2026-12-26': '2026-12-31' }, extra: [] },
-  2027: { replacements: {}, extra: [] },
-};
-/* ===== koniec MOCK ===== */
+// Dni wolne w firmie: GET/PUT /api/admin/days-off/:year → { saturdays: [{date, name, replacement}], extra: [{date, name}] }
+const daysOff = {};   // rok → { replacements: { sobota: data }, extra: [{ date, name }] } (stan formularza)
+(() => {
+  const y = new Date().getFullYear();
+  $('o-year').innerHTML = [y - 1, y, y + 1].map(v => `<option${v === y ? ' selected' : ''}>${v}</option>`).join('');
+})();
 
 // --- poczta i zasady: GET/PUT /api/admin/settings
 const PORTS = { starttls: 587, tls: 465, none: 25 };
@@ -197,8 +198,41 @@ $('rules-form').addEventListener('submit', async e => {
 });
 
 // --- dni wolne
+const offYear = () => +$('o-year').value;
+const fromApi = d => ({
+  replacements: Object.fromEntries(d.saturdays.map(s => [s.date, s.replacement || ''])),
+  extra: d.extra.map(x => ({ ...x })),
+});
+let offSeq = 0;
+/** Zawsze świeże dane z serwera (PUT zastępuje cały rok — nieaktualny stan nadpisałby zmiany innego admina).
+    Do czasu odpowiedzi formularz jest pusty i zablokowany. */
+async function loadOff() {
+  const y = offYear(), seq = ++offSeq;
+  delete daysOff[y];
+  setOffLoading(`Wczytywanie dni wolnych na ${y} r.…`);
+  try {
+    const d = await api('/api/admin/days-off/' + y);
+    if (seq !== offSeq) return; // w międzyczasie zmieniono rok
+    daysOff[y] = fromApi(d);
+    renderOff();
+  } catch (err) {
+    if (seq !== offSeq) return;
+    setOffLoading('Nie udało się wczytać dni wolnych.');
+    showMsg('off-msg', 'err', 'Nie udało się wczytać dni wolnych: ' + err.message + ' Spróbuj wybrać rok ponownie.');
+  }
+}
+/** Formularz bez danych roku: puste listy, przyciski zablokowane */
+function setOffLoading(text) {
+  $('off-form').querySelectorAll('input[data-date]').forEach(el => el._flatpickr && el._flatpickr.destroy());
+  $('sat-list').innerHTML = `<div class="dayoff muted">${esc(text)}</div>`;
+  $('extra-list').innerHTML = '';
+  $('add-extra').disabled = $('off-save').disabled = true;
+}
+
 function renderOff() {
-  const y = +$('o-year').value, cfg = daysOff[y];
+  const y = offYear(), cfg = daysOff[y];
+  if (!cfg) return;
+  $('add-extra').disabled = $('off-save').disabled = false;
   const sats = PL.saturdayHolidays(y);
   // stare kalendarze (flatpickr) usuwamy przed podmianą pól
   $('off-form').querySelectorAll('input[data-date]').forEach(el => el._flatpickr && el._flatpickr.destroy());
@@ -216,7 +250,7 @@ function renderOff() {
       <label for="ex-${i}" class="sr-only">Data</label>
       <input type="text" data-date id="ex-${i}" data-extra-date="${i}" value="${x.date}" min="${y}-01-01" max="${y}-12-31">
       <label for="exn-${i}" class="sr-only">Opis</label>
-      <input type="text" id="exn-${i}" data-extra-name="${i}" value="${esc(x.name)}" placeholder="Np. dzień wolny za pracę w święto">
+      <input type="text" id="exn-${i}" data-extra-name="${i}" value="${esc(x.name)}" maxlength="100" placeholder="Np. dzień wolny za pracę w święto">
       <button type="button" class="btn btn-danger btn-sm" data-extra-del="${i}">Usuń</button>
     </div>`).join('') || '<div class="dayoff muted">Brak innych dni wolnych.</div>';
   datePickers($('off-form'));
@@ -228,28 +262,62 @@ function validateSat(date) {
   info.className = ok ? 'state-ok' : 'state-bad';
   info.textContent = ok ? WD[PL.parse(v).getDay()] : 'To nie jest dzień roboczy';
 }
-$('o-year').addEventListener('change', renderOff);
+// Zmiana roku: zawsze od nowa z serwera (niezapisane zmiany innego roku przepadają — jak przy przeładowaniu strony)
+$('o-year').addEventListener('change', () => { $('off-msg').hidden = true; $('off-changed').hidden = true; loadOff(); });
+const cfgNow = () => daysOff[offYear()];   // undefined, dopóki rok się wczytuje
 $('sat-list').addEventListener('change', e => {
-  const d = e.target.dataset.sat; if (!d) return;
-  daysOff[+$('o-year').value].replacements[d] = e.target.value; validateSat(d);
+  const d = e.target.dataset.sat, cfg = cfgNow(); if (!d || !cfg) return;
+  cfg.replacements[d] = e.target.value; validateSat(d);
 });
-$('extra-list').addEventListener('input', e => {
-  const list = daysOff[+$('o-year').value].extra;
-  if (e.target.dataset.extraDate) list[e.target.dataset.extraDate].date = e.target.value;
-  if (e.target.dataset.extraName) list[e.target.dataset.extraName].name = e.target.value;
-});
+// pole daty (flatpickr) zgłasza „change”, opis — „input”
+const onExtra = e => {
+  const cfg = cfgNow(); if (!cfg) return;
+  if (e.target.dataset.extraDate) cfg.extra[e.target.dataset.extraDate].date = e.target.value;
+  if (e.target.dataset.extraName) cfg.extra[e.target.dataset.extraName].name = e.target.value;
+};
+$('extra-list').addEventListener('input', onExtra);
+$('extra-list').addEventListener('change', onExtra);
 $('extra-list').addEventListener('click', e => {
-  const i = e.target.dataset.extraDel; if (i === undefined) return;
-  daysOff[+$('o-year').value].extra.splice(i, 1); renderOff();
+  const i = e.target.dataset.extraDel, cfg = cfgNow(); if (i === undefined || !cfg) return;
+  cfg.extra.splice(i, 1); renderOff();
 });
-$('add-extra').addEventListener('click', () => { daysOff[+$('o-year').value].extra.push({ date: '', name: '' }); renderOff(); });
-$('off-form').addEventListener('submit', e => {
+$('add-extra').addEventListener('click', () => { const cfg = cfgNow(); if (!cfg) return; cfg.extra.push({ date: '', name: '' }); renderOff(); });
+
+const STATUS_PL = { pending: 'czeka', approved: 'zatwierdzony', cancel_requested: 'prośba o anulowanie' };
+const LIMIT_PL = { na_zadanie: 'urlop na żądanie', opieka_188: 'opieka nad dzieckiem', sila_wyzsza: 'siła wyższa' };
+$('off-form').addEventListener('submit', async e => {
   e.preventDefault();
-  // Docelowo: PUT /api/admin/days-off/:year — serwer przelicza dni we wnioskach obejmujących zmienione daty
-  $('off-msg').textContent = 'Zapisano dni wolne. Wnioski obejmujące te dni zostaną przeliczone.'; $('off-msg').hidden = false;
+  const y = offYear(), cfg = daysOff[y], btn = $('off-save');
+  if (!cfg) return showMsg('off-msg', 'err', `Dni wolne na ${y} r. nie są wczytane — nic nie zapisano. Wybierz rok ponownie.`);
+  btn.disabled = true;
+  $('off-changed').hidden = true;
+  try {
+    const out = await api('/api/admin/days-off/' + y, { method: 'PUT', body: cfg });
+    daysOff[y] = fromApi(out);
+    renderOff();
+    const n = out.changed.length;
+    const missing = out.saturdays.filter(s => !s.replacement).length;
+    const word = n === 1 ? 'wniosek' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'wnioski' : 'wniosków';
+    let text = `Zapisano dni wolne na ${y} r.` + (n ? ` Przeliczono ${n} ${word} (lista poniżej).` : ' Żaden wniosek nie wymagał przeliczenia.');
+    if (missing) text += ` Uwaga: dla ${missing} ${missing === 1 ? 'święta' : 'świąt'} w sobotę nie wyznaczono jeszcze dnia wolnego.`;
+    const zero = out.changed.filter(c => c.zero).length;
+    showMsg('off-msg', out.problems.length || zero ? 'warn' : 'ok', text);
+    const items = out.changed.map(c => c.zero
+      ? `<li class="state-bad">${esc(c.employee)}, ${fmtNice(c.date_from, c.date_to)} (${STATUS_PL[c.status] || c.status}): ${c.old} → 0 dni — wniosek nie obejmuje już żadnego dnia roboczego; ${c.status === 'pending' ? 'odrzuć go albo poproś pracownika o wycofanie' : 'anuluj go w „Wnioskach”'}.</li>`
+      : `<li>${esc(c.employee)}, ${fmtNice(c.date_from, c.date_to)} (${STATUS_PL[c.status] || c.status}): ${c.old} → ${plDays(c.days)}</li>`);
+    items.push(...out.problems.map(p => p.kind === 'pool'
+      ? `<li class="state-bad">${esc(p.employee)}: pula na ${p.year} r. na minusie (${p.left})${p.year > y ? ' — mniejszy zaległy przeniesiony z ' + y + ' r.' : ''}. Popraw wymiar albo wniosek.</li>`
+      : `<li class="state-bad">${esc(p.employee)}: przekroczony limit — ${LIMIT_PL[p.type] || p.type}: ${p.used} z ${p.limit} dni w ${y} r.</li>`));
+    $('off-changed').innerHTML = items.join('');
+    $('off-changed').hidden = !items.length;
+  } catch (err) {
+    showMsg('off-msg', 'err', err.message);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
-renderOff();
+meReady.then(loadOff);
 </script>
 </body>
 </html>

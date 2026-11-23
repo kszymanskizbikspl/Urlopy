@@ -14,8 +14,8 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | ✅ zrobione (lista z saldem już w kroku 3) | `bcb1357` |
 | 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | `bcb1357` |
 | 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | `2467afa` |
-| 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ✅ zrobione | — |
-| 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ⬜ do zrobienia | — |
+| 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ✅ zrobione | `6863499` |
+| 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ✅ zrobione | — |
 | 8. Cron, log audytowy, kopie zapasowe | ⬜ do zrobienia (log audytowy już zapisuje zdarzenia) | — |
 
 **Strony — co działa na prawdziwych danych, a co jest jeszcze `MOCK`:**
@@ -25,8 +25,8 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | `login.html` | ✅ logowanie, „zapamiętaj mnie”, powrót na stronę po zalogowaniu, komunikat o limicie prób |
 | `rejestracja.html` | ✅ dane z zaproszenia (`/api/invite`), zakładanie konta |
 | `reset-hasla.html` | ✅ prośba o link, ustawienie nowego hasła, wygasły link |
-| `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe; ⬜ Dni wolne w firmie — `MOCK` (krok 7) |
-| `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku” |
+| `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe, ✅ Dni wolne w firmie (dzień za święto w sobotę, inne dni wolne, lista przeliczonych wniosków) |
+| `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku”, eksport CSV (podsumowanie, zatwierdzone wnioski) |
 | `panel.html` | ✅ nagłówek, saldo (z zaległym i limitem „na żądanie”), kalendarz z dniami wolnymi firmy, podgląd wniosku (dni, saldo po akceptacji, limity, kolizje, kto ma wtedy urlop), składanie, wycofywanie, prośba o anulowanie, decyzje i uwagi przełożonego na liście |
 | `admin-wnioski.html` | ✅ do rozpatrzenia (z prośbami o anulowanie), zatwierdzone / odrzucone / anulowane / wszystkie z wyborem roku, zatwierdzanie, odrzucanie z powodem, zgoda lub odmowa anulowania, anulowanie zatwierdzonego urlopu z powodem, ostrzeżenia o kolizjach (zastępca, inni nieobecni, termin w przeszłości) |
 | menu „Wnioski” (wszystkie strony) | ✅ licznik wniosków czekających na decyzję zalogowanej osoby (`pending_count` w `/api/me`) |
@@ -111,6 +111,9 @@ urlopy/
 │  ├─ mail.js              ← kolejka e-maili, wysyłka, ponowienia
 │  ├─ mail-templates.js    ← treści e-maili
 │  ├─ leave.js             ← saldo, zaległy urlop, dni robocze (holidays.js), walidacja i zapis wniosku
+│  ├─ approvals.js         ← kto zatwierdza, decyzje, e-maile o wnioskach
+│  ├─ daysoff.js           ← dni wolne w firmie: walidacja, zapis roku, przeliczanie wniosków
+│  ├─ export.js            ← CSV dla kadr (średnik, UTF-8 z BOM)
 │  ├─ audit.js             ← log audytowy
 │  ├─ bootstrap.js         ← pierwszy admin z ADMIN_EMAIL
 │  ├─ jobs.js              ← ⬜ cron (krok 8)
@@ -201,6 +204,7 @@ saldo(Y)   = wymiar(Y) + zalegly(Y) - wykorzystane(Y) - oczekujace(Y)
 **Walidacja przy POST /api/requests.** Data od ≤ do, ten sam rok, co najmniej 1 dzień roboczy, brak nakładania z własnym wnioskiem `pending`/`approved`, saldo ≥ dni (z uwzględnieniem oczekujących), limit typu. Zatwierdzanie w transakcji, żeby dwa równoległe wnioski nie przekroczyły salda.
 
 **Święto w sobotę.** Admin wyznacza w ustawieniach dzień wolny w zamian, trafia on do `company_days_off`. Po zmianie dni wolnych serwer przelicza `days` dla wniosków `pending` i przyszłych `approved`.
+✅ Zrobione w kroku 7: zapis roku zastępuje wszystkie jego dni wolne i w tej samej transakcji przelicza wnioski `pending` oraz `approved` / `cancel_requested`, które się jeszcze nie skończyły (`date_to >= dziś`); zakończonych nie zmienia (rozliczona historia). Dzień wolny musi być dniem roboczym w tym samym roku; dzień w zamian za sobotę może zostać niewyznaczony (strona ostrzega). Admin dostaje listę przeliczonych wniosków i **skutki przeliczenia** (`problems`): pula na minusie w roku zapisu **i w kolejnych latach** (mniejszy zaległy) oraz przekroczone limity (na żądanie / opieka / siła wyższa) — tylko to, co przeliczenie pogorszyło. Pracownik nie dostaje e-maila o przeliczeniu — zmianę widzi w panelu. Wniosek, który cały wypadł na nowe dni wolne, ma 0 dni: zostaje (bez automatycznego anulowania), jest wyraźnie oznaczony na liście po zapisie, **nie da się go zatwierdzić** (odrzucić / anulować — tak) i nie trafia do eksportu. Strona zawsze wczytuje rok od nowa przy zmianie roku (PUT zastępuje cały rok — stary stan nie nadpisze zmian innego admina); w trakcie wczytywania formularz jest pusty i zablokowany.
 
 Zasady oparte na Kodeksie pracy; warto potwierdzić szczegóły (np. wymiar dla niepełnego etatu, urlop proporcjonalny przy zatrudnieniu w trakcie roku) z osobą prowadzącą kadry.
 
@@ -273,8 +277,10 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ POST /api/admin/allowances/copy        { from, to: from+1 } → { copied, missing }
 ✅ GET|PUT /api/admin/settings            (poczta + zasady; hasło SMTP nigdy nie wraca)
 ✅ POST /api/admin/settings/smtp-test     { to, …pola formularza }
-⬜ GET|PUT /api/admin/days-off/:year                                                             (7)
-⬜ GET  /api/admin/export?year=           → CSV/XLSX dla kadr                                      (7)
+✅ GET  /api/admin/days-off/:year        → { year, saturdays: [{ date, name, replacement }], extra: [{ date, name }] }
+✅ PUT  /api/admin/days-off/:year        { replacements: { sobota: data | '' }, extra: [{ date, name }] }
+                                         → jak GET + { changed: przeliczone wnioski (zero: 0 dni), problems: pula na minusie / limity }
+✅ GET  /api/admin/export?kind=summary|requests&year=   → CSV (podsumowanie na osobę / zatwierdzone wnioski)
 ```
 
 Odpowiedzi z zaproszeń i resetu od admina: `{ mail: 'queued' }` albo — gdy poczta nie jest ustawiona — `{ mail: 'smtp_missing', link }` (link do przekazania ręcznie).
@@ -323,9 +329,10 @@ Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlo
    Zrobione: `routes/requests.js` + walidacja w `leave.js` (dni liczy serwer z `holidays.js` i `company_days_off`, kolizje, saldo, limity — w jednej transakcji), `panel.html` na prawdziwym API (saldo bieżącego roku, saldo innego roku doczytywane przy wyborze terminu, lista zastępców, kto ma wtedy urlop, wycofanie i prośba o anulowanie). Sprawdzone testami API i testem dymnym strony w jsdom. Do kroku 6: e-maile do przełożonego, decyzja o `cancel_requested`, wnioski `pending`, których termin minął.
 6. ✅ **Akceptacja wniosków, e-maile z decyzją, wykrywanie kolizji.**
    Zrobione: `src/approvals.js` (kto zatwierdza, kto może decydować, e-maile, decyzje w transakcji z kontrolą puli), `routes/approvals.js`, `admin-wnioski.html` na prawdziwym API, licznik w menu, e-maile do przełożonego (nowy wniosek, prośba o anulowanie) i do pracownika (decyzja, `.ics`). Sprawdzone testami API, testem dymnym stron w jsdom i prawdziwą wysyłką przez Mailpit (załącznik `.ics`). Wnioski czekające, których termin minął, zostają do decyzji (z ostrzeżeniem na karcie).
-7. ⬜ Dni wolne w firmie, przeliczanie wniosków, eksport CSV.
+7. ✅ **Dni wolne w firmie, przeliczanie wniosków, eksport CSV.**
+   Zrobione: `src/daysoff.js` + `GET/PUT /api/admin/days-off/:year`, sekcja „Dni wolne w firmie” w Ustawieniach na prawdziwym API (lata: poprzedni, bieżący, następny), przeliczanie wniosków w transakcji (sekcja 4). Eksport `src/export.js`: **podsumowanie** (osoba: konto, wymiar, zaległy, pula, wykorzystane, czeka, pozostało, na żądanie, okolicznościowy, opieka, siła wyższa, bezpłatny) i **zatwierdzone wnioski** (osoba, rodzaj, od–do, dni, status, kto i kiedy zatwierdził, zastępstwo). CSV ze średnikiem i UTF-8 z BOM (polski Excel otwiera wprost), daty dd/mm/rrrr, ochrona przed formułami (`=`, `+`, `-`, `@` na początku tekstu). Przyciski na stronie „Pracownicy” dla wybranego roku. XLSX i rozbicie na miesiące — na razie nie (propozycje w sekcji 10).
 8. ⬜ Cron: przypomnienia i zestawienie tygodniowe, log audytowy (zapis zdarzeń już działa — brak podglądu), kopie zapasowe.
-9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 63 testy — logowanie i ochrona API, saldo i zaległy, trasy kroków 4–6 (e-maile sprawdzane w kolejce `mail_queue`). Kolejne kroki dopisują swoje testy.
+9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 74 testy — logowanie i ochrona API, saldo i zaległy, trasy kroków 4–7 (e-maile sprawdzane w kolejce `mail_queue`). Kolejne kroki dopisują swoje testy.
 
 Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ===== */` zastąpić wywołaniem `fetch` z komentarza obok.
 
@@ -338,7 +345,7 @@ Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ====
 - **Plik .ics / subskrypcja kalendarza**: zatwierdzone urlopy w kalendarzu telefonu, a zestaw nieobecności zespołu jako adres subskrypcji.
 - **Wniosek do podpisu (PDF)**: wydruk wniosku w formacie dla akt osobowych.
 - **Wymiar proporcjonalny**: kalkulator dla osób zatrudnionych w trakcie roku lub na część etatu (zaokrąglanie w górę do pełnego dnia, art. 154²).
-- **Eksport dla kadr/księgowości** (CSV/XLSX) z wykorzystaniem urlopu w miesiącu.
+- **Eksport dla kadr/księgowości**: CSV jest (krok 7); można dodać XLSX i wykorzystanie urlopu w rozbiciu na miesiące.
 - **Log zmian**: kto zmienił wymiar, kto zatwierdził wniosek, kiedy (już w modelu danych jako `audit_log`).
 - **Dostęp z internetu** przez Pangolin (sekcja 8a), np. żeby składać wnioski z budowy.
 - **Link w portalu narzędzi ZBIKS** do aplikacji. Później można rozważyć logowanie przez Keycloak (OIDC) jako drugą opcję, zostawiając własne logowanie e-mailem.

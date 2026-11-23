@@ -6,6 +6,8 @@ const settings = require('../settings');
 const mail = require('../mail');
 const templates = require('../mail-templates');
 const leave = require('../leave');
+const daysOff = require('../daysoff');
+const exporter = require('../export');
 const { sendInvite, sendReset } = require('../accounts');
 const { requireApi } = require('../auth');
 
@@ -262,6 +264,37 @@ router.post('/allowances/copy', adminOnly, (req, res) => {
   const out = db.transaction(() => ({ copied: copyAllowances.run({ from, to }).changes, missing: withoutAllowance.get({ y: to }) }))();
   audit(req.user.id, 'allowances_copied', { from, to, copied: out.copied });
   res.json(out);
+});
+
+// ---------- dni wolne w firmie (krok 7) ----------
+router.get('/days-off/:year', adminOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store').json(daysOff.get(parseYear(req.params.year)));
+});
+
+// Zapis zastępuje dni wolne roku i przelicza dni we wnioskach (czekających i zatwierdzonych, które się nie skończyły)
+router.put('/days-off/:year', adminOnly, (req, res) => {
+  const year = parseYear(req.params.year);
+  const out = daysOff.save(year, req.body);
+  audit(req.user.id, 'days_off_saved', {
+    year,
+    days: [...out.saturdays.filter(s => s.replacement).map(s => s.replacement), ...out.extra.map(x => x.date)],
+    recalculated: out.changed.map(c => ({ id: c.id, old: c.old, days: c.days })),
+    problems: out.problems.length ? out.problems : undefined,
+  });
+  res.json(out);
+});
+
+// ---------- eksport dla kadr (krok 7) ----------
+router.get('/export', adminOnly, (req, res) => {
+  const year = parseYear(req.query.year);
+  const kind = req.query.kind === 'requests' ? 'requests' : 'summary';
+  const csv = kind === 'requests' ? exporter.requests(year) : exporter.summary(year);
+  audit(req.user.id, 'export', { kind, year });
+  res.set({
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="urlopy-${kind === 'requests' ? 'wnioski' : 'podsumowanie'}-${year}.csv"`,
+    'Cache-Control': 'no-store',
+  }).send(csv);
 });
 
 module.exports = router;

@@ -139,6 +139,8 @@ function decideRequest(user, requestId, action, rawReason) {
     const reason = (rawReason || '').trim().slice(0, 500) || null;
     const needReason = typeof a.reason === 'function' ? a.reason(r.status) : a.reason;
     if (needReason && !reason) throw new DecisionError('Wpisz powód — pracownik zobaczy go w e-mailu.', 400);
+    // Po dodaniu dni wolnych w firmie wniosek może nie obejmować już żadnego dnia roboczego (0 dni)
+    if (action === 'approve' && r.days === 0) throw new DecisionError('Ten wniosek nie obejmuje już żadnego dnia roboczego (dni wolne w firmie) — odrzuć go.');
     if (action === 'approve') checkPool(r);
     // przy odmowie anulowania pula się nie zmienia (cancel_requested liczył się jak zatwierdzony)
     const changed = decide.run({ id: r.id, from: r.status, to: a.to, by: user.id, note: reason }).changes;
