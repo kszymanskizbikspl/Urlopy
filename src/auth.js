@@ -30,7 +30,7 @@ function passwordProblem(pw) {
 }
 
 // ---------- sesja ----------
-const getUser = db.prepare('SELECT id, email, first_name, last_name, role, manager_id, state FROM users WHERE id = ?');
+const getUser = db.prepare('SELECT id, email, first_name, last_name, role, manager_id, state, weekly_digest FROM users WHERE id = ?');
 
 /** Logowanie: nowy identyfikator sesji (ochrona przed przejęciem sesji), token CSRF, czas życia ciasteczka. */
 function startSession(req, user, remember) {

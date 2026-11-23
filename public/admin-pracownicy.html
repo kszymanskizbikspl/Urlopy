@@ -121,6 +121,11 @@
       <label class="check"><input type="checkbox" id="e-active"><span>Konto aktywne</span></label>
       <span class="hint">Wyłączone konto nie może się zalogować. Historia urlopów zostaje.</span>
     </div>
+    <!-- tylko dla roli Przełożony / Administrator — pracownicy listy nie dostają -->
+    <div class="field" id="e-digest-box">
+      <label class="check"><input type="checkbox" id="e-digest"><span>Wysyłaj w poniedziałki listę nieobecnych</span></label>
+      <span class="hint">E-mail z osobami, które mają urlop w danym tygodniu. Osoba może to też zmienić sama na stronie „Wnioski”.</span>
+    </div>
     <button type="button" class="btn btn-ghost btn-sm" id="e-reset" style="align-self: flex-start">Wyślij link do zmiany hasła</button>
     <div class="dialog-foot">
       <!-- Anuluj jako type="button": Enter w polu wysyła formularz pierwszym przyciskiem submit, czyli „Zapisz” -->
@@ -146,6 +151,9 @@ const fullName = u => `${u.first} ${u.last}`.trim() || u.email;
 const localIso = iso => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const editBtn = u => `<button type="button" class="btn btn-ghost btn-sm" data-edit="${u.id}">Edytuj</button>`;
 const isApprover = u => u.state === 'active' && (u.role === 'manager' || u.role === 'admin');
+/** Pole „lista nieobecnych” widoczne tylko przy roli Przełożony / Administrator (także po zmianie roli w oknie) */
+const syncDigestBox = () => { $('e-digest-box').hidden = $('e-role').value === 'employee'; };
+document.getElementById('e-role').addEventListener('change', syncDigestBox);
 // Wymiaru sprzed pierwszego roku osoby nie da się dodać (serwer odmawia — zmieniłby zaległy w kolejnych latach)
 const beforeFirst = (u, y) => u.firstYear != null && y < u.firstYear;
 // Ten sam warunek co `missing` w POST /api/admin/allowances/copy: aktywne konto, brak wymiaru, który da się ustawić
@@ -172,7 +180,7 @@ async function load() {
     const data = await api('/api/admin/users?year=' + y);
     if (y !== year()) return; // w międzyczasie zmieniono rok
     users = data.users.map(u => ({
-      id: u.id, first: u.first_name, last: u.last_name, email: u.email, role: u.role, state: u.state, managerId: u.manager_id,
+      id: u.id, first: u.first_name, last: u.last_name, email: u.email, role: u.role, state: u.state, managerId: u.manager_id, weeklyDigest: u.weekly_digest,
       invitedAt: u.invited_at && localIso(u.invited_at), inviteExpired: u.invite_expired,
       y: { [y]: u.balance }, carryAuto: u.carry_auto, firstYear: u.first_year,
     }));
@@ -305,6 +313,8 @@ $('rows').addEventListener('click', async e => {
     : `Wyliczony automatycznie z ${editing.editYear - 1}: ${plDays(editing.carryAuto)}.` + (a ? '' : ' Wpisz wymiar, żeby go ustawić na ten rok.');
   $('e-active').checked = editing.state !== 'disabled';
   $('e-active').disabled = self;
+  $('e-digest').checked = !!editing.weeklyDigest;
+  syncDigestBox();
   // Przełożony: aktywne osoby z rolą Przełożony / Administrator, bez edytowanej
   const approvers = users.filter(u => u.id !== editing.id && (isApprover(u) || u.id === editing.managerId));
   $('e-manager').innerHTML = '<option value="">— brak (wnioski do administratorów) —</option>' +
@@ -349,6 +359,8 @@ async function save(u) {
   if (state !== u.state) patch.state = state;
   const managerId = $('e-manager').value ? +$('e-manager').value : null;
   if (managerId !== (u.managerId ?? null)) patch.manager_id = managerId;
+  // lista nieobecnych — tylko gdy pole jest widoczne (rola Przełożony / Administrator)
+  if (!$('e-digest-box').hidden && $('e-digest').checked !== !!u.weeklyDigest) patch.weekly_digest = $('e-digest').checked;
   // Bez wymiaru: tworzymy go tylko, gdy admin wpisał wymiar; z wymiarem: gdy zmienił się wymiar albo ręczny zaległy
   const allowanceChanged = a ? a.days !== days || (a.carryOverride ?? null) !== carry : daysRaw !== '';
   if (!allowanceChanged && !Object.keys(patch).length) return;

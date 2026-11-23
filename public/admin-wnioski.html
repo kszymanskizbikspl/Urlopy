@@ -44,6 +44,12 @@
     </div>
   </div>
 
+  <!-- Moje powiadomienia: osobiste ustawienie przełożonego / administratora (PUT /api/me/notifications) -->
+  <div class="field" id="digest-box" hidden>
+    <label class="check"><input type="checkbox" id="my-digest"><span>Wysyłaj mi w poniedziałki rano e-mailem listę nieobecnych w tym tygodniu</span></label>
+    <span class="hint" id="digest-hint"></span>
+  </div>
+
   <div class="chips" role="tablist" aria-label="Filtr wniosków" id="tabs">
     <button type="button" role="tab" data-f="pending" aria-selected="true">Do rozpatrzenia <span id="c-pending"></span></button>
     <button type="button" role="tab" data-f="approved" aria-selected="false">Zatwierdzone</button>
@@ -242,7 +248,34 @@ $('reason-dlg').addEventListener('close', () => {
   run(p.action, p.r, $('reason').value.trim());
 });
 
-meReady.then(load);
+// Moje powiadomienia: poniedziałkowa lista nieobecnych
+function digestHint(globalOn) {
+  $('digest-hint').textContent = globalOn
+    ? 'Lista idzie tylko wtedy, gdy ktoś ma w tym tygodniu urlop.'
+    : 'Uwaga: wysyłka jest teraz wyłączona dla wszystkich (Ustawienia → Zasady urlopowe) — ten wybór zadziała po jej włączeniu.';
+}
+$('my-digest').addEventListener('change', async e => {
+  const box = e.target, on = box.checked;
+  box.disabled = true;
+  try {
+    await api('/api/me/notifications', { method: 'PUT', body: { weekly_digest: on } });
+    toast(on ? 'Będziesz dostawać w poniedziałki listę nieobecnych.' : 'Nie będziesz już dostawać poniedziałkowej listy nieobecnych.');
+  } catch (err) {
+    box.checked = !on; // nie zapisało się — wracamy do poprzedniego stanu
+    toast('Nie udało się zapisać: ' + err.message, 'err', 8000);
+  } finally {
+    box.disabled = false;
+  }
+});
+
+meReady.then(me => {
+  if (me.role !== 'employee') {
+    $('my-digest').checked = !!me.weekly_digest;
+    digestHint(me.weekly_digest_global);
+    $('digest-box').hidden = false;
+  }
+  load();
+});
 </script>
 </body>
 </html>

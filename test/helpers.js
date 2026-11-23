@@ -29,6 +29,7 @@ async function startServer() {
       PATH: process.env.PATH,
       NODE_ENV: 'test', TZ: 'Europe/Warsaw', PORT: String(port), DATA_DIR: dataDir, APP_URL: url,
       SESSION_SECRET: 'x'.repeat(64), SETTINGS_KEY: 'k'.repeat(64), ADMIN_EMAIL: '',
+      JOBS_DISABLED: '1', // bez zadań w tle (zestawienie, kopie) — testowane osobno w jobs.test.js
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

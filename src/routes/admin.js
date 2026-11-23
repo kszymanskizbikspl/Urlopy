@@ -8,6 +8,7 @@ const templates = require('../mail-templates');
 const leave = require('../leave');
 const daysOff = require('../daysoff');
 const exporter = require('../export');
+const jobs = require('../jobs');
 const { sendInvite, sendReset } = require('../accounts');
 const { requireApi } = require('../auth');
 
@@ -52,7 +53,7 @@ router.post('/settings/smtp-test', adminOnly, async (req, res, next) => {
 
 // ---------- pracownicy ----------
 const usersQ = db.prepare(`
-  SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.state, u.manager_id,
+  SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.state, u.manager_id, u.weekly_digest,
          (SELECT MAX(expires_at) FROM tokens t WHERE t.user_id = u.id AND t.kind = 'invite' AND t.used_at IS NULL) AS invite_expires_at
   FROM users u`);
 const collator = new Intl.Collator('pl', { sensitivity: 'base' });
@@ -69,6 +70,7 @@ router.get('/users', adminOnly, (req, res) => {
     role: u.role,
     state: u.state,
     manager_id: u.manager_id,
+    weekly_digest: u.weekly_digest === 1,   // poniedziałkowa lista nieobecnych (dotyczy przełożonych i adminów)
     // data wysłania ostatniego zaproszenia = ważność − 7 dni
     invited_at: u.invite_expires_at ? new Date(Date.parse(u.invite_expires_at) - 7 * DAY).toISOString() : null,
     invite_expired: u.state === 'invited' && (!u.invite_expires_at || u.invite_expires_at <= now),
@@ -159,7 +161,7 @@ router.post('/users/:id/reset-password', adminOnly, (req, res) => {
 });
 
 // ---------- edycja osoby: rola, konto, przełożony ----------
-const userById = db.prepare('SELECT id, role, state, manager_id FROM users WHERE id = ?');
+const userById = db.prepare('SELECT id, role, state, manager_id, weekly_digest FROM users WHERE id = ?');
 const otherActiveAdmins = db.prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND state = 'active' AND id <> ?").pluck();
 const clearSubordinates = db.prepare('UPDATE users SET manager_id = NULL WHERE manager_id = ?');
 const APPROVER_ROLES = ['manager', 'admin'];
@@ -175,6 +177,10 @@ router.patch('/users/:id', adminOnly, (req, res) => {
   if (b.state !== undefined) {
     if (!['active', 'disabled'].includes(b.state)) throw badRequest('Nieprawidłowy stan konta.');
     changes.state = b.state;
+  }
+  if (b.weekly_digest !== undefined) {
+    if (typeof b.weekly_digest !== 'boolean') throw badRequest('weekly_digest: true albo false.');
+    changes.weekly_digest = b.weekly_digest ? 1 : 0;
   }
   if (b.manager_id !== undefined) {
     changes.manager_id = b.manager_id === null || b.manager_id === '' ? null : toNum(b.manager_id);
@@ -295,6 +301,66 @@ router.get('/export', adminOnly, (req, res) => {
     'Content-Disposition': `attachment; filename="urlopy-${kind === 'requests' ? 'wnioski' : 'podsumowanie'}-${year}.csv"`,
     'Cache-Control': 'no-store',
   }).send(csv);
+});
+
+// ---------- log zdarzeń (krok 8) ----------
+// Grupy do filtra na stronie; „requests” i „jobs” — po przedrostku nazwy zdarzenia
+const AUDIT_GROUPS = {
+  logins: { actions: ['login', 'login_failed', 'logout'] },
+  accounts: { actions: ['register', 'reset_requested', 'password_reset', 'user_invited', 'invite_resent', 'reset_sent_by_admin', 'user_updated', 'notifications_changed', 'bootstrap_admin_promoted', 'bootstrap_admin_invited'] },
+  allowances: { actions: ['allowance_set', 'allowances_copied'] },
+  requests: { prefix: 'request\\_%' },
+  settings: { actions: ['settings_changed', 'smtp_test', 'days_off_saved', 'export', 'backup_manual'] },
+  jobs: { prefix: 'job\\_%' },
+};
+const auditQ = db.prepare(`
+  SELECT a.id, a.created_at, a.user_id, a.action, a.details,
+         trim(u.first_name || ' ' || u.last_name) AS user_name, u.email AS user_email
+  FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+  WHERE a.id < @before
+    AND (@all = 1 OR a.action IN (SELECT value FROM json_each(@actions)) OR a.action LIKE @prefix ESCAPE '\\')
+    AND (@user IS NULL OR a.user_id = @user)
+  ORDER BY a.id DESC
+  LIMIT @limit`);
+
+/** Parametr zapytania: dodatnia liczba całkowita albo brak (null); co innego → 400 (to nie ścieżka, więc nie 404) */
+function queryInt(v, label) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw badRequest(`${label}: nieprawidłowa wartość.`);
+  return n;
+}
+
+router.get('/audit', adminOnly, (req, res) => {
+  const before = queryInt(req.query.before, 'before') ?? Number.MAX_SAFE_INTEGER;
+  const limit = Math.min(200, queryInt(req.query.limit, 'limit') ?? 50);
+  const group = Object.hasOwn(AUDIT_GROUPS, req.query.group) ? AUDIT_GROUPS[req.query.group] : null;
+  const user = queryInt(req.query.user, 'user');
+  const rows = auditQ.all({
+    before, limit: limit + 1, user,
+    all: group ? 0 : 1,
+    actions: JSON.stringify(group && group.actions ? group.actions : []),
+    prefix: group && group.prefix ? group.prefix : '\u0000', // nic nie pasuje
+  });
+  const more = rows.length > limit;
+  const page = rows.slice(0, limit).map(r => {
+    let details = r.details;
+    try { details = r.details == null ? null : JSON.parse(r.details); } catch { /* zwykły tekst */ }
+    return { ...r, details };
+  });
+  res.set('Cache-Control', 'no-store').json({ rows: page, next: more ? page[page.length - 1].id : null });
+});
+
+// ---------- zadania automatyczne i kopie zapasowe (krok 8) ----------
+router.get('/jobs', adminOnly, (req, res) => {
+  res.set('Cache-Control', 'no-store').json(jobs.status());
+});
+
+// „Zrób kopię teraz” — osobny plik z godziną, nie zastępuje nocnej kopii
+router.post('/backups', adminOnly, async (req, res) => {
+  const out = await jobs.backup(new Date(), { manual: true });
+  audit(req.user.id, 'backup_manual', { name: out.name, size: out.size });
+  res.status(201).json({ ...out, ...jobs.status() });
 });
 
 module.exports = router;

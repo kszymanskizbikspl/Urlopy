@@ -211,4 +211,48 @@ function ics({ r, typeLabel, host, cancel = false, organizer, attendee }) {
   ].filter(l => l !== null).join('\r\n');
 }
 
-module.exports = { invite, reset, passwordChanged, test, fmtDateTime, forApprover, decision, ics };
+// ---------- zadania automatyczne (krok 8) ----------
+/** Poniedziałek 7:00 — do przełożonych i administratorów: kto jest nieobecny w tym tygodniu.
+    rows: [{ name, date_from, date_to, days }], free: [{ date, name }] (święta i dni wolne w firmie w tym tygodniu) */
+function weeklyDigest({ firstName, weekFrom, weekTo, rows, free, link }) {
+  const week = fmtRange(weekFrom, weekTo);
+  const line = r => `${r.name}: ${fmtRange(r.date_from, r.date_to)}`;
+  const lead = `Nieobecni w tym tygodniu (${week}):`;
+  const freeText = free.length ? `Dni wolne w tym tygodniu: ${free.map(f => `${fmtDate(f.date)} — ${f.name}`).join('; ')}.` : '';
+  return {
+    subject: `Nieobecni w tym tygodniu: ${week}`,
+    text: `${hello(firstName)}
+
+${lead}
+${rows.map(r => `- ${line(r)}`).join('\n')}
+${freeText ? `\n${freeText}\n` : ''}
+${link}
+
+Zestawienie wysyłane w poniedziałki rano (można je wyłączyć w Ustawieniach → Zasady urlopowe).
+`,
+    html: layout({
+      paragraphs: [
+        esc(hello(firstName)),
+        esc(lead),
+        { raw: `<ul style="margin:0 0 14px;padding-left:20px">${rows.map(r => `<li style="margin:0 0 4px"><strong>${esc(r.name)}</strong>: ${esc(fmtRange(r.date_from, r.date_to))}</li>`).join('')}</ul>` },
+        freeText ? esc(freeText) : null,
+      ].filter(Boolean),
+      button: { href: link, label: 'Otwórz Urlopy ZBIKS' },
+      footer: 'Zestawienie wysyłane w poniedziałki rano (można je wyłączyć w Ustawieniach → Zasady urlopowe).',
+    }),
+  };
+}
+
+/** 1 lipca — do pracownika z niewykorzystanym zaległym urlopem z poprzedniego roku */
+function carryReminder({ firstName, year, carriedLeft, link }) {
+  const deadline = fmtDate(`${year}-09-30`);
+  const lead = `${plDays(carriedLeft)} zaległego urlopu z ${year - 1} r. nie ma jeszcze zaplanowanych terminów. Zaległy urlop trzeba wykorzystać do ${deadline} (art. 168 Kodeksu pracy).`;
+  const tip = 'Zaplanuj go i złóż wniosek w aplikacji — przełożonemu łatwiej będzie ułożyć zastępstwa.';
+  return {
+    subject: `Zaległy urlop: ${plDays(carriedLeft)} do zaplanowania przed ${deadline}`,
+    text: `${hello(firstName)}\n\n${lead}\n\n${tip}\n\n${link}\n`,
+    html: layout({ paragraphs: [esc(hello(firstName)), esc(lead), esc(tip)], button: { href: link, label: 'Złóż wniosek' } }),
+  };
+}
+
+module.exports = { invite, reset, passwordChanged, test, fmtDateTime, forApprover, decision, ics, weeklyDigest, carryReminder };

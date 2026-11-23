@@ -15,8 +15,8 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | `bcb1357` |
 | 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | `2467afa` |
 | 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ✅ zrobione | `6863499` |
-| 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ✅ zrobione | — |
-| 8. Cron, log audytowy, kopie zapasowe | ⬜ do zrobienia (log audytowy już zapisuje zdarzenia) | — |
+| 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ✅ zrobione | `bc75fa3` |
+| 8. Zadania automatyczne, log audytowy, kopie zapasowe | ✅ zrobione | — |
 
 **Strony — co działa na prawdziwych danych, a co jest jeszcze `MOCK`:**
 
@@ -25,7 +25,7 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | `login.html` | ✅ logowanie, „zapamiętaj mnie”, powrót na stronę po zalogowaniu, komunikat o limicie prób |
 | `rejestracja.html` | ✅ dane z zaproszenia (`/api/invite`), zakładanie konta |
 | `reset-hasla.html` | ✅ prośba o link, ustawienie nowego hasła, wygasły link |
-| `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe, ✅ Dni wolne w firmie (dzień za święto w sobotę, inne dni wolne, lista przeliczonych wniosków) |
+| `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe, ✅ Dni wolne w firmie (dzień za święto w sobotę, inne dni wolne, lista przeliczonych wniosków), ✅ Zadania automatyczne i kopie zapasowe (ostatnie wykonanie, lista kopii, „Zrób kopię teraz”), ✅ Log zdarzeń (filtr, „Pokaż starsze”) |
 | `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku”, eksport CSV (podsumowanie, zatwierdzone wnioski) |
 | `panel.html` | ✅ nagłówek, saldo (z zaległym i limitem „na żądanie”), kalendarz z dniami wolnymi firmy, podgląd wniosku (dni, saldo po akceptacji, limity, kolizje, kto ma wtedy urlop), składanie, wycofywanie, prośba o anulowanie, decyzje i uwagi przełożonego na liście |
 | `admin-wnioski.html` | ✅ do rozpatrzenia (z prośbami o anulowanie), zatwierdzone / odrzucone / anulowane / wszystkie z wyborem roku, zatwierdzanie, odrzucanie z powodem, zgoda lub odmowa anulowania, anulowanie zatwierdzonego urlopu z powodem, ostrzeżenia o kolizjach (zastępca, inni nieobecni, termin w przeszłości) |
@@ -76,7 +76,7 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | Poczta | `nodemailer` + kolejka `mail_queue` | SMTP z ustawień w panelu | ✅ |
 | Bezpieczeństwo | `helmet`, `express-rate-limit`, Origin + token CSRF | ochrona logowania i formularzy | ✅ |
 | Kalendarz w polach daty | flatpickr 4.6.13 (pliki w `public/vendor`) | `dd/mm/rrrr` niezależnie od języka przeglądarki, działa bez internetu | ✅ |
-| Zadania cykliczne | `node-cron` | przypomnienia, zestawienie tygodniowe | ⬜ krok 8 |
+| Zadania cykliczne | własny harmonogram (`src/jobs.js`) zamiast `node-cron` | co minutę sprawdza, co jest do zrobienia, i zapisuje w `job_runs`, za jaki okres już wykonał: po restarcie nadrabia, nigdy nie wysyła dwa razy; bez nowej zależności | ✅ |
 
 **Daty:** wszędzie, gdzie widzi je użytkownik (strony, e-maile), format europejski `dd/mm/rrrr` (`fmtDate` / `fmtNice` w `js/ui.js`, `fmtDateTime` w `src/mail-templates.js`). Pola wyboru daty to `<input type="text" data-date>` z kalendarzem flatpickr (`public/vendor/flatpickr`, bez internetu) — pokazują `dd/mm/rrrr` niezależnie od języka przeglądarki. W kodzie, API i bazie daty zawsze jako `rrrr-mm-dd`.
 
@@ -116,9 +116,9 @@ urlopy/
 │  ├─ export.js            ← CSV dla kadr (średnik, UTF-8 z BOM)
 │  ├─ audit.js             ← log audytowy
 │  ├─ bootstrap.js         ← pierwszy admin z ADMIN_EMAIL
-│  ├─ jobs.js              ← ⬜ cron (krok 8)
+│  ├─ jobs.js              ← zadania automatyczne: lista nieobecnych, przypomnienie o zaległym, nocna kopia bazy
 │  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  requests.js (API pracownika)  approvals.js (akceptacja)
-├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql  004_mail_ics.sql
+├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql  004_mail_ics.sql  005_job_runs.sql  006_user_weekly_digest.sql
 ├─ test/                   ← node --test: helpers.js (serwer + baza testowa), auth, leave, admin-users
 ├─ Dockerfile              ← etapy: deps → test (tylko testy) → obraz docelowy
 ├─ docker-compose.yml  docker-compose.test.yml  .env.example  .gitattributes
@@ -235,8 +235,8 @@ Adresy i dane serwera wpisujesz w **Ustawienia → Poczta wychodząca** (zapis d
 | Decyzja | pracownik | zatwierdzony (`.ics`) / odrzucony z powodem / anulowany przez przełożonego z powodem (`.ics` CANCEL) / zgoda na anulowanie (`.ics` CANCEL) / odmowa anulowania z powodem | ✅ |
 | Prośba o anulowanie | przełożony | dot. zatwierdzonego urlopu w przyszłości | ✅ |
 | Wniosek wycofany | przełożony | pracownik wycofał czekający wniosek — nic nie trzeba robić | ✅ (dodane) |
-| Przypomnienie | pracownik | 1 lipca: niewykorzystany zaległy urlop | ⬜ krok 8 |
-| Zestawienie | wszyscy / admini | poniedziałek 7:00, kto jest nieobecny w tygodniu | ⬜ krok 8 |
+| Przypomnienie | pracownik | 1 lipca od 8:00 (nadrabiane do 7 lipca): ile zaległego urlopu nie ma jeszcze terminu przed 30 września — liczą się tylko dni urlopu (zatwierdzone i czekające) do 30.09, urlop zaplanowany później zaległego nie ratuje; tylko osoby, którym coś zostało | ✅ |
+| Zestawienie | przełożeni i administratorzy (oprócz tych, którzy je wyłączyli u siebie) | poniedziałek od 7:00: kto ma zatwierdzony urlop w tym tygodniu + święta i dni wolne w tym tygodniu; gdy nikt nieobecny — bez e-maila | ✅ |
 
 Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy błędzie SMTP), żeby awaria poczty nie blokowała zatwierdzania. Zrobione jako `mail_queue`: ponowienia po 1, 5, 15, 60, 180, 360 min; po wysłaniu treść (z linkiem) jest kasowana; link resetu po godzinie nie jest już wysyłany. Gdy poczta nie jest ustawiona, admin dostaje link z zaproszenia / resetu do przekazania ręcznie.
 
@@ -253,7 +253,9 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ GET  /api/reset?token=                 → { email } do pola username przy nowym haśle; 410 = link nieważny
 ✅ GET  /api/health                       → stan serwera i bazy (healthcheck Dockera)
 
-✅ GET  /api/me                           → { id, email, first_name, last_name, role, csrf }
+✅ GET  /api/me                           → { id, email, first_name, last_name, role, csrf, pending_count,
+                                              weekly_digest, weekly_digest_global (dwa ostatnie: przełożony / admin) }
+✅ PUT  /api/me/notifications             { weekly_digest: true|false } — przełożony / admin, własna lista nieobecnych
 ✅ GET  /api/me/balance?year=            → { year, balance (jak na liście pracowników) | null, carriedLeft, available, typeUsed, limits }
 ✅ GET  /api/me/requests                  → { today, requests } — wszystkie własne, z zastępcą i decyzją
 ✅ POST /api/requests                     { date_from, date_to, type, substitute_id, note } → 201 { request }; 400 dane, 409 saldo/limit/kolizja
@@ -272,7 +274,7 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ POST /api/admin/invitations            { email, first_name, last_name, role, days, carry, year }
 ✅ POST /api/admin/invitations/:id/resend
 ✅ POST /api/admin/users/:id/reset-password  → link do zmiany hasła wysłany przez admina
-✅ PATCH /api/admin/users/:id             { role?, state?, manager_id? } → { ok, cleared_subordinates }
+✅ PATCH /api/admin/users/:id             { role?, state?, manager_id?, weekly_digest? } → { ok, cleared_subordinates }
 ✅ PUT  /api/admin/allowances/:userId/:year { days, carry_override (null = automat) } → { balance }
 ✅ POST /api/admin/allowances/copy        { from, to: from+1 } → { copied, missing }
 ✅ GET|PUT /api/admin/settings            (poczta + zasady; hasło SMTP nigdy nie wraca)
@@ -281,6 +283,9 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ PUT  /api/admin/days-off/:year        { replacements: { sobota: data | '' }, extra: [{ date, name }] }
                                          → jak GET + { changed: przeliczone wnioski (zero: 0 dni), problems: pula na minusie / limity }
 ✅ GET  /api/admin/export?kind=summary|requests&year=   → CSV (podsumowanie na osobę / zatwierdzone wnioski)
+✅ GET  /api/admin/audit?group=&user=&before=&limit=     → { rows, next } — log zdarzeń od najnowszych
+✅ GET  /api/admin/jobs                   → { runs, backups, backup_dir, keep_days }
+✅ POST /api/admin/backups                → kopia bazy teraz (osobny plik „…-reczna.sqlite”)
 ```
 
 Odpowiedzi z zaproszeń i resetu od admina: `{ mail: 'queued' }` albo — gdy poczta nie jest ustawiona — `{ mail: 'smtp_missing', link }` (link do przekazania ręcznie).
@@ -307,7 +312,7 @@ Pierwsze uruchomienie: jeśli w bazie nie ma admina, serwer tworzy zaproszenie d
 
 `APP_URL` to adres serwera w LAN, np. `http://192.168.88.X:1003` albo nazwa z firmowego DNS. Ten adres trafia do linków w e-mailach (zaproszenie, reset hasła), więc linki działają tylko z komputerów w sieci firmy.
 
-Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlopy-$(date +%F).sqlite"` z hosta (cron), trzymać np. 30 dni.
+Kopia zapasowa: ✅ robi ją sama aplikacja (krok 8) — codziennie od 2:00 spójna kopia bazy (backup API SQLite, także w trakcie pracy) do `data/backup/urlopy-RRRR-MM-DD.sqlite`, kopie starsze niż 30 dni kasowane; w Ustawieniach lista kopii i „Zrób kopię teraz”. **Kopia leży na tym samym dysku co baza** — na serwerze trzeba ją regularnie kopiować gdzie indziej (NAS, inny dysk), np. cron na hoście: `rsync -a /ścieżka/do/urlopy/data/backup/ /mnt/nas/urlopy-backup/`. Odtworzenie: zatrzymać kontener, podmienić `data/urlopy.sqlite` wybraną kopią (i usunąć `urlopy.sqlite-wal` / `-shm`), uruchomić.
 
 ## 8a. Sieć: tylko LAN
 
@@ -331,8 +336,9 @@ Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlo
    Zrobione: `src/approvals.js` (kto zatwierdza, kto może decydować, e-maile, decyzje w transakcji z kontrolą puli), `routes/approvals.js`, `admin-wnioski.html` na prawdziwym API, licznik w menu, e-maile do przełożonego (nowy wniosek, prośba o anulowanie) i do pracownika (decyzja, `.ics`). Sprawdzone testami API, testem dymnym stron w jsdom i prawdziwą wysyłką przez Mailpit (załącznik `.ics`). Wnioski czekające, których termin minął, zostają do decyzji (z ostrzeżeniem na karcie).
 7. ✅ **Dni wolne w firmie, przeliczanie wniosków, eksport CSV.**
    Zrobione: `src/daysoff.js` + `GET/PUT /api/admin/days-off/:year`, sekcja „Dni wolne w firmie” w Ustawieniach na prawdziwym API (lata: poprzedni, bieżący, następny), przeliczanie wniosków w transakcji (sekcja 4). Eksport `src/export.js`: **podsumowanie** (osoba: konto, wymiar, zaległy, pula, wykorzystane, czeka, pozostało, na żądanie, okolicznościowy, opieka, siła wyższa, bezpłatny) i **zatwierdzone wnioski** (osoba, rodzaj, od–do, dni, status, kto i kiedy zatwierdził, zastępstwo). CSV ze średnikiem i UTF-8 z BOM (polski Excel otwiera wprost), daty dd/mm/rrrr, ochrona przed formułami (`=`, `+`, `-`, `@` na początku tekstu). Przyciski na stronie „Pracownicy” dla wybranego roku. XLSX i rozbicie na miesiące — na razie nie (propozycje w sekcji 10).
-8. ⬜ Cron: przypomnienia i zestawienie tygodniowe, log audytowy (zapis zdarzeń już działa — brak podglądu), kopie zapasowe.
-9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 74 testy — logowanie i ochrona API, saldo i zaległy, trasy kroków 4–7 (e-maile sprawdzane w kolejce `mail_queue`). Kolejne kroki dopisują swoje testy.
+8. ✅ **Zadania automatyczne, log audytowy, kopie zapasowe.**
+   Zrobione: `src/jobs.js` (własny harmonogram zamiast node-cron — sekcja 1; tabela `job_runs`), lista nieobecnych w poniedziałek do **przełożonych i administratorów** (decyzja: pracownicy jej nie dostają, niezależnie od `show_absent`), przypomnienie 1 lipca o zaległym urlopie, nocna kopia bazy w aplikacji (sekcja 8), podgląd logu zdarzeń w Ustawieniach (filtr po rodzaju, stronicowanie, polskie nazwy zdarzeń). Oba e-maile można wyłączyć w Ustawieniach → Zasady urlopowe. **Lista nieobecnych ma też osobisty wyłącznik** (kolumna `users.weekly_digest`, migracja `006`, domyślnie włączone): przełożony / admin sam na stronie „Wnioski” (`PUT /api/me/notifications`), a admin każdemu w Pracownicy → Edytuj (`PATCH /api/admin/users/:id { weekly_digest }`). Globalny przełącznik w Ustawieniach działa jak wyłącznik dla wszystkich — strona „Wnioski” mówi, gdy jest wyłączony. Kopia nie zależy od ustawień. Kopie idą po kolei: „Zrób kopię teraz” w trakcie nocnej kopii czeka na nią i robi własny plik; przy `docker stop` serwer nie przyjmuje nowych zadań i czeka na kopię w toku, a pozostałości po przerwanej kopii (`.tmp`) są sprzątane przy następnej. Log zdarzeń nie jest czyszczony (mała tabela; do rozważenia po kilku latach).
+9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 91 testów — logowanie i ochrona API, saldo i zaległy, trasy kroków 4–8 (e-maile sprawdzane w kolejce `mail_queue`); zadania automatyczne testowane w procesie z podstawianą datą (`test/jobs.test.js`), serwer w testach API działa bez zadań w tle (`JOBS_DISABLED=1`). Kolejne kroki dopisują swoje testy.
 
 Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ===== */` zastąpić wywołaniem `fetch` z komentarza obok.
 
@@ -346,6 +352,6 @@ Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ====
 - **Wniosek do podpisu (PDF)**: wydruk wniosku w formacie dla akt osobowych.
 - **Wymiar proporcjonalny**: kalkulator dla osób zatrudnionych w trakcie roku lub na część etatu (zaokrąglanie w górę do pełnego dnia, art. 154²).
 - **Eksport dla kadr/księgowości**: CSV jest (krok 7); można dodać XLSX i wykorzystanie urlopu w rozbiciu na miesiące.
-- **Log zmian**: kto zmienił wymiar, kto zatwierdził wniosek, kiedy (już w modelu danych jako `audit_log`).
+- **Log zmian**: ✅ zrobione w kroku 8 (Ustawienia → Log zdarzeń).
 - **Dostęp z internetu** przez Pangolin (sekcja 8a), np. żeby składać wnioski z budowy.
 - **Link w portalu narzędzi ZBIKS** do aplikacji. Później można rozważyć logowanie przez Keycloak (OIDC) jako drugą opcję, zostawiając własne logowanie e-mailem.

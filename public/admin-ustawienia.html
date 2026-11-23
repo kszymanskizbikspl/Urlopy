@@ -105,6 +105,50 @@
       <button class="btn" id="off-save">Zapisz dni wolne</button>
     </div>
   </form>
+
+  <!-- ===== Zadania automatyczne i kopie zapasowe ===== -->
+  <section class="card" aria-labelledby="jobs-h">
+    <div class="card-head">
+      <div style="max-width: 560px">
+        <h2 class="card-title" id="jobs-h">Zadania automatyczne i kopie zapasowe</h2>
+        <p class="small muted">Lista nieobecnych idzie w poniedziałki od 7:00 do przełożonych i administratorów (gdy ktoś ma urlop) — oprócz tych, którzy wyłączyli ją u siebie (strona „Wnioski” albo Pracownicy → Edytuj). Przypomnienie o zaległym urlopie — 1 lipca od 8:00. Kopia bazy — codziennie od 2:00, trzymamy 30 dni.</p>
+      </div>
+    </div>
+    <ul class="small" id="jobs-runs" style="margin: 0; padding-left: 20px"></ul>
+    <h3 class="label">Kopie zapasowe</h3>
+    <p class="small muted" id="backup-where"></p>
+    <ul class="small" id="backup-list" style="margin: 0; padding-left: 20px"></ul>
+    <p class="msg" id="jobs-msg" role="status" hidden></p>
+    <div class="card-foot"><button type="button" class="btn btn-ghost" id="backup-now">Zrób kopię teraz</button></div>
+  </section>
+
+  <!-- ===== Log zdarzeń ===== -->
+  <section class="card" aria-labelledby="log-h">
+    <div class="card-head">
+      <div style="max-width: 520px">
+        <h2 class="card-title" id="log-h">Log zdarzeń</h2>
+        <p class="small muted">Kto co zmienił i kiedy: logowania, konta, wymiary urlopu, decyzje o wnioskach, ustawienia.</p>
+      </div>
+      <div><label for="log-group" class="sr-only">Rodzaj zdarzeń</label>
+        <select id="log-group" style="width: auto">
+          <option value="">Wszystkie</option>
+          <option value="requests">Wnioski</option>
+          <option value="accounts">Konta</option>
+          <option value="allowances">Wymiar urlopu</option>
+          <option value="settings">Ustawienia</option>
+          <option value="logins">Logowania</option>
+          <option value="jobs">Zadania automatyczne</option>
+        </select></div>
+    </div>
+    <div class="table-box" style="overflow-x: auto">
+      <table>
+        <thead><tr><th>Kiedy</th><th>Kto</th><th>Co</th><th>Szczegóły</th></tr></thead>
+        <tbody id="log-rows"></tbody>
+      </table>
+    </div>
+    <p class="msg" id="log-msg" role="status" hidden></p>
+    <div class="card-foot"><button type="button" class="btn btn-ghost" id="log-more" hidden>Pokaż starsze</button></div>
+  </section>
 </main>
 
 <script src="js/holidays.js"></script>
@@ -317,7 +361,97 @@ $('off-form').addEventListener('submit', async e => {
   }
 });
 
-meReady.then(loadOff);
+// --- zadania automatyczne i kopie zapasowe: GET /api/admin/jobs, POST /api/admin/backups
+const fmtTs = ts => {   // czas z bazy (UTC) → „dd/mm/rrrr gg:mm” lokalnie
+  const d = new Date(String(ts).replace(' ', 'T') + (/[zZ]$/.test(ts) ? '' : 'Z'));
+  if (isNaN(d)) return String(ts);
+  return `${fmtDate(localDate(d.toISOString()))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const fmtSize = b => (b >= 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(b / 1024)) + ' kB');
+const JOB_NAMES = { weekly_digest: 'Lista nieobecnych (poniedziałek)', carry_reminder: 'Przypomnienie o zaległym urlopie (1 lipca)', backup: 'Nocna kopia bazy' };
+
+function renderJobs(st) {
+  $('jobs-runs').innerHTML = Object.entries(JOB_NAMES).map(([k, label]) => {
+    const r = st.runs[k];
+    return `<li>${label}: ${r ? `ostatnio ${fmtTs(r.ran_at)}${r.info ? ` — ${esc(r.info)}` : ''}` : '<span class="muted">jeszcze nie wykonano</span>'}</li>`;
+  }).join('');
+  $('backup-where').textContent = `Katalog na serwerze: ${st.backup_dir} (w wolumenie z danymi — ./data/backup). Kopiuj go regularnie na inny dysk lub NAS.`;
+  $('backup-list').innerHTML = st.backups.slice(0, 5).map(b => `<li>${esc(b.name)} — ${fmtSize(b.size)}, ${fmtTs(b.created_at)}</li>`).join('')
+    + (st.backups.length > 5 ? `<li class="muted">… i ${st.backups.length - 5} starszych</li>` : '')
+    || '<li class="muted">Brak kopii — pierwsza powstanie dziś po 2:00 albo przyciskiem poniżej.</li>';
+}
+async function loadJobs() {
+  try { renderJobs(await api('/api/admin/jobs')); } catch (err) { showMsg('jobs-msg', 'err', 'Nie udało się wczytać stanu zadań: ' + err.message); }
+}
+$('backup-now').addEventListener('click', async () => {
+  const btn = $('backup-now');
+  btn.disabled = true;
+  showMsg('jobs-msg', 'warn', 'Robię kopię…');
+  try {
+    const out = await api('/api/admin/backups', { method: 'POST' });
+    renderJobs(out);
+    showMsg('jobs-msg', 'ok', `Zrobiono kopię: ${out.name} (${fmtSize(out.size)}).`);
+  } catch (err) {
+    showMsg('jobs-msg', 'err', 'Nie udało się zrobić kopii: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// --- log zdarzeń: GET /api/admin/audit?group=&before=
+const ACTIONS = {
+  login: 'Logowanie', login_failed: 'Nieudane logowanie', logout: 'Wylogowanie',
+  register: 'Założenie konta', reset_requested: 'Prośba o zmianę hasła', password_reset: 'Zmiana hasła',
+  user_invited: 'Zaproszenie', invite_resent: 'Ponowne zaproszenie', reset_sent_by_admin: 'Link do zmiany hasła od admina',
+  user_updated: 'Zmiana danych osoby', notifications_changed: 'Zmiana powiadomień (lista nieobecnych)', bootstrap_admin_promoted: 'Pierwszy administrator (rola)', bootstrap_admin_invited: 'Pierwszy administrator (zaproszenie)',
+  allowance_set: 'Zmiana wymiaru urlopu', allowances_copied: 'Przeniesienie wymiarów na nowy rok',
+  request_created: 'Nowy wniosek', request_cancelled: 'Wycofanie wniosku', request_cancel_requested: 'Prośba o anulowanie',
+  request_approve: 'Zatwierdzenie wniosku', request_reject: 'Odrzucenie wniosku', request_cancel: 'Anulowanie urlopu', request_keep: 'Odmowa anulowania',
+  settings_changed: 'Zmiana ustawień', smtp_test: 'Test poczty', days_off_saved: 'Zmiana dni wolnych w firmie', export: 'Eksport CSV',
+  backup_manual: 'Kopia zapasowa (ręczna)', job_weekly_digest: 'Lista nieobecnych wysłana', job_carry_reminder: 'Przypomnienia o zaległym urlopie wysłane',
+};
+const detailText = d => {
+  if (d == null) return '';
+  if (typeof d !== 'object') return String(d);
+  const s = Object.entries(d).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ');
+  return s.length > 240 ? s.slice(0, 240) + '…' : s;
+};
+let logNext = null, logSeq = 0;
+async function loadLog(more = false) {
+  if (more && !logNext) return; // np. kliknięcie „Pokaż starsze” w trakcie zmiany filtra
+  if (!more) {
+    // nowy filtr: od razu czyścimy tabelę i kursor, żeby nie mieszać wierszy dwóch filtrów
+    logNext = null;
+    $('log-more').hidden = true;
+    $('log-rows').innerHTML = '<tr><td colspan="4" class="muted">Wczytywanie…</td></tr>';
+  }
+  const seq = ++logSeq;
+  const qs = new URLSearchParams({ limit: '50' });
+  if ($('log-group').value) qs.set('group', $('log-group').value);
+  if (more && logNext) qs.set('before', logNext);
+  try {
+    const data = await api('/api/admin/audit?' + qs);
+    if (seq !== logSeq) return; // w międzyczasie zmieniono filtr
+    const html = data.rows.map(r => `<tr>
+      <td style="white-space: nowrap">${fmtTs(r.created_at)}</td>
+      <td>${r.user_id ? esc(r.user_name || r.user_email || '#' + r.user_id) : '<span class="muted">system</span>'}</td>
+      <td>${esc(ACTIONS[r.action] || r.action)}</td>
+      <td class="small muted" style="word-break: break-word">${esc(detailText(r.details))}</td></tr>`).join('');
+    if (more) $('log-rows').insertAdjacentHTML('beforeend', html);
+    else $('log-rows').innerHTML = html || '<tr><td colspan="4" class="muted">Brak zdarzeń.</td></tr>';
+    logNext = data.next;
+    $('log-more').hidden = !logNext;
+  } catch (err) {
+    if (seq !== logSeq) return;
+    if (!more) $('log-rows').innerHTML = '<tr><td colspan="4" class="muted">Nie udało się wczytać.</td></tr>';
+    showMsg('log-msg', 'err', 'Nie udało się wczytać logu: ' + err.message);
+  }
+}
+$('log-group').addEventListener('change', () => loadLog());
+$('log-more').addEventListener('click', () => loadLog(true));
+
+meReady.then(() => { loadOff(); loadJobs(); loadLog(); });
 </script>
 </body>
 </html>

@@ -13,6 +13,7 @@ const adminRoutes = require('./routes/admin');
 const requestRoutes = require('./routes/requests');
 const approvalRoutes = require('./routes/approvals');
 const mail = require('./mail');
+const jobs = require('./jobs');
 const { ensureFirstAdmin } = require('./bootstrap');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -101,6 +102,7 @@ app.use((err, req, res, next) => {
 
 ensureFirstAdmin();
 mail.start();
+jobs.start();
 
 const server = app.listen(config.PORT, () => console.log(`[urlopy] nasłuch na porcie ${config.PORT}, baza: ${db.DB_FILE}`));
 
@@ -108,7 +110,8 @@ const server = app.listen(config.PORT, () => console.log(`[urlopy] nasłuch na p
 function shutdown(signal) {
   console.log(`[urlopy] ${signal}, zamykanie`);
   mail.stop();
-  server.close(() => { db.close(); process.exit(0); });
+  // trwająca kopia zapasowa kończy się przed zamknięciem bazy
+  jobs.stop().then(() => server.close(() => { db.close(); process.exit(0); }));
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
