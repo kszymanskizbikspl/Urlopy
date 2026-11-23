@@ -22,6 +22,7 @@
     approved: ['Zatwierdzony', 'p-approved'],
     rejected: ['Odrzucony', 'p-rejected'],
     cancelled: ['Wycofany', 'p-cancelled'],
+    cancel_requested: ['Prośba o anulowanie', 'p-pending'],   // zatwierdzony, czeka na zgodę przełożonego na anulowanie
   };
   window.badge = (s, text) => `<span class="pill ${STATUS[s][1]}">${text || STATUS[s][0]}</span>`;
 

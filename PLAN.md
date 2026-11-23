@@ -11,9 +11,9 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | 1. Szkielet Express, `public/`, migracje, Docker | ✅ zrobione | `c400ec7` |
 | 2. Logowanie, sesje, ochrona stron, pierwszy admin | ✅ zrobione | `c400ec7`, poprawki `464d88b` |
 | 3. SMTP + test, zaproszenia, rejestracja, reset hasła | ✅ zrobione | `2643cdc` |
-| 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | ✅ zrobione (lista z saldem już w kroku 3) | — |
-| 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | — |
-| 5. Panel pracownika: saldo, kalendarz, wnioski | ⬜ do zrobienia | — |
+| 4. Pracownicy i wymiar urlopu, kopiowanie na nowy rok, zaległy | ✅ zrobione (lista z saldem już w kroku 3) | `bcb1357` |
+| 9. Testy automatyczne w repozytorium | ✅ zrobione razem z krokiem 4 | `bcb1357` |
+| 5. Panel pracownika: saldo, kalendarz, wnioski | ✅ zrobione (e-maile do przełożonego przeniesione do kroku 6) | — |
 | 6. Akceptacja wniosków, e-maile z decyzją, kolizje | ⬜ do zrobienia | — |
 | 7. Dni wolne w firmie, przeliczanie wniosków, eksport CSV | ⬜ do zrobienia | — |
 | 8. Cron, log audytowy, kopie zapasowe | ⬜ do zrobienia (log audytowy już zapisuje zdarzenia) | — |
@@ -27,7 +27,7 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 | `reset-hasla.html` | ✅ prośba o link, ustawienie nowego hasła, wygasły link |
 | `admin-ustawienia.html` | ✅ Poczta wychodząca, ✅ Zasady urlopowe; ⬜ Dni wolne w firmie — `MOCK` (krok 7) |
 | `admin-pracownicy.html` | ✅ lista z saldem, zaproszenia, „Wyślij ponownie”, link do zmiany hasła, edycja osoby (wymiar, ręczny zaległy, rola, przełożony, konto aktywne), „Przenieś wymiary z poprzedniego roku” |
-| `panel.html` | ✅ nagłówek (imię, menu według roli); ⬜ saldo, wnioski, kalendarz — `MOCK` (krok 5) |
+| `panel.html` | ✅ nagłówek, saldo (z zaległym i limitem „na żądanie”), kalendarz z dniami wolnymi firmy, podgląd wniosku (dni, saldo po akceptacji, limity, kolizje, kto ma wtedy urlop), składanie, wycofywanie, prośba o anulowanie; ⬜ licznik „3” przy „Wnioski” w menu — `MOCK` (krok 6) |
 | `admin-wnioski.html` | ⬜ `MOCK` (krok 6); licznik w menu („3”) też `MOCK` |
 
 **Decyzje podjęte w trakcie (zmiany względem pierwotnego planu):**
@@ -47,6 +47,12 @@ Repozytorium: https://github.com/kszymanskizbikspl/Urlopy (gałąź `main`).
 - „Przenieś wymiary”: kopiuje tylko `days` z roku poprzedniego (zaległy liczy automat, bez `carry_override`), pomija wyłączone konta i już ustawione wymiary. Osobom bez wymiaru w poprzednim roku admin ustawia go przez „Edytuj” (działa też dla roku bez wymiaru — wymiar powstaje tylko, gdy admin wpisze liczbę dni; sama zmiana roli czy przełożonego go nie tworzy).
 - Wymiaru na rok **przed** pierwszym wymiarem osoby nie da się dodać (409) — przesunąłby punkt startowy i dodał zaległy, którego nigdy nie było. Zaległy z kadr wpisuje się jako ręczny zaległy w pierwszym roku. Baner „Przenieś wymiary” i licznik `missing` liczą tylko aktywne konta, którym da się ustawić wymiar.
 - Testy bez Mailpit na razie — bez SMTP API zwraca link (`smtp_missing`), co wystarcza; Mailpit dojdzie przy e-mailach z decyzją (krok 6).
+- **Wnioski na dowolne daty** (także wstecz), ale tylko na rok poprzedni, bieżący albo następny i w obrębie jednego roku. Przy dacie w przeszłości panel tylko ostrzega; przełożony i tak zatwierdza.
+- Wycofanie: wniosek czekający → `cancelled` od razu; zatwierdzony, który się jeszcze nie zaczął → `cancel_requested` (do decyzji przełożonego urlop nadal się liczy); zatwierdzony, który już trwa albo minął → tylko przez przełożonego.
+- **Zaległy a kolejne lata:** wniosek z puli sprawdzany jest „w najgorszym wypadku” (`leave.safeLeft` — czekające wnioski z wcześniejszych lat liczone jak zatwierdzone). Wniosek na rok Y nie przejdzie, jeśli przez niego w którymś kolejnym roku z ustawioną pulą zabrakłoby dni na urlop już zatwierdzony lub czekający (rok już wcześniej na minusie nie blokuje wniosków, które go nie pogarszają). Panel liczy podgląd z tego samego salda (`available` w `/api/me/balance`). **Krok 6: zatwierdzanie musi robić to samo sprawdzenie w transakcji.**
+- Limity „na żądanie” / opieka / siła wyższa liczą wnioski `pending` + `approved` + `cancel_requested`. „Na żądanie” zmniejsza też pulę wypoczynkowego.
+- „Kto ma wtedy urlop” (ustawienie `show_absent`): tylko zatwierdzone urlopy aktywnych osób, samo imię, nazwisko i termin — bez rodzaju urlopu i uwag.
+- E-maile „Nowy wniosek” i „Prośba o anulowanie” przeniesione do kroku 6 — razem ze stroną akceptacji, do której mają prowadzić.
 
 **Jak to było testowane:** każdy krok sprawdzony w kontenerze Docker (`NODE_ENV=production`) skryptami curl/Python, e-maile przez testowy serwer Mailpit; kalendarz dat w jsdom. Dwa przeglądy kodu (`/code-review`) — wszystkie uwagi poprawione. **Od kroku 4 testy są w repozytorium** (`test/`, `node --test`): każdy plik uruchamia prawdziwy serwer z pustą bazą w katalogu tymczasowym i przygotowuje dane bezpośrednio w SQLite. Uruchomienie (bez Node.js na komputerze): `docker compose -f docker-compose.test.yml up --build --exit-code-from tests`. Nowa logika = nowe testy w `test/`.
 
@@ -97,11 +103,11 @@ urlopy/
 │  ├─ settings.js          ← ustawienia, walidacja, szyfrowanie hasła SMTP
 │  ├─ mail.js              ← kolejka e-maili, wysyłka, ponowienia
 │  ├─ mail-templates.js    ← treści e-maili
-│  ├─ leave.js             ← saldo i zaległy urlop (⬜ walidacja wniosków — krok 5)
+│  ├─ leave.js             ← saldo, zaległy urlop, dni robocze (holidays.js), walidacja i zapis wniosku
 │  ├─ audit.js             ← log audytowy
 │  ├─ bootstrap.js         ← pierwszy admin z ADMIN_EMAIL
 │  ├─ jobs.js              ← ⬜ cron (krok 8)
-│  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  ⬜ requests.js
+│  └─ routes/ auth.js (login, logout, rejestracja, reset)  me.js  admin.js  requests.js (API pracownika)
 ├─ migrations/001_init.sql  002_sessions.sql  003_mail_queue.sql
 ├─ test/                   ← node --test: helpers.js (serwer + baza testowa), auth, leave, admin-users
 ├─ Dockerfile              ← etapy: deps → test (tylko testy) → obraz docelowy
@@ -214,9 +220,9 @@ Adresy i dane serwera wpisujesz w **Ustawienia → Poczta wychodząca** (zapis d
 | Reset hasła | pracownik | link ważny 1 godzinę, jednorazowy (prośba samodzielna albo od admina) | ✅ |
 | Hasło zmienione | pracownik | informacja + „jeśli to nie Ty, skontaktuj się z administratorem” | ✅ (dodane) |
 | Test poczty | wskazany adres | z Ustawień | ✅ |
-| Nowy wniosek | przełożony / admini | termin, dni, zastępca, przyciski do panelu | ⬜ krok 5–6 |
+| Nowy wniosek | przełożony / admini | termin, dni, zastępca, przyciski do panelu | ⬜ krok 6 |
 | Decyzja | pracownik | zatwierdzony / odrzucony z powodem, załącznik `.ics` | ⬜ krok 6 |
-| Prośba o anulowanie | przełożony | dot. zatwierdzonego urlopu w przyszłości | ⬜ krok 5–6 |
+| Prośba o anulowanie | przełożony | dot. zatwierdzonego urlopu w przyszłości | ⬜ krok 6 |
 | Przypomnienie | pracownik | 1 lipca: niewykorzystany zaległy urlop | ⬜ krok 8 |
 | Zestawienie | wszyscy / admini | poniedziałek 7:00, kto jest nieobecny w tygodniu | ⬜ krok 8 |
 
@@ -236,11 +242,12 @@ Wysyłkę robić asynchronicznie z prostą kolejką w tabeli (ponowienie przy b�
 ✅ GET  /api/health                       → stan serwera i bazy (healthcheck Dockera)
 
 ✅ GET  /api/me                           → { id, email, first_name, last_name, role, csrf }
-⬜ GET  /api/me/balance?year=2026         → { allowance, carried, used, pending, left, onDemandUsed }   (5)
-⬜ GET  /api/me/requests?year=2026                                                               (5)
-⬜ POST /api/requests                     { date_from, date_to, type, substitute_id, note }        (5)
-⬜ POST /api/requests/:id/cancel                                                                 (5)
-⬜ GET  /api/calendar?from=&to=           → święta, dni wolne firmy, moje wnioski, nieobecni       (5)
+✅ GET  /api/me/balance?year=            → { year, balance (jak na liście pracowników) | null, carriedLeft, available, typeUsed, limits }
+✅ GET  /api/me/requests                  → { today, requests } — wszystkie własne, z zastępcą i decyzją
+✅ POST /api/requests                     { date_from, date_to, type, substitute_id, note } → 201 { request }; 400 dane, 409 saldo/limit/kolizja
+✅ POST /api/requests/:id/cancel          → { status: cancelled | cancel_requested }; cudzy = 404
+✅ GET  /api/calendar?from=&to=           → { daysOff, showAbsent, absent } (święta liczy przeglądarka z holidays.js; zakres ≤ 3 lata)
+✅ GET  /api/people                       → aktywne osoby (bez mnie) do wyboru zastępcy
 
 ⬜ GET  /api/admin/requests?status=pending                                                       (6)
 ⬜ POST /api/admin/requests/:id/approve                                                          (6)
@@ -300,11 +307,12 @@ Kopia zapasowa: codziennie `sqlite3 data/urlopy.sqlite ".backup data/backup/urlo
    Zrobione: Ustawienia → Poczta i Zasady na prawdziwym API, szyfrowane hasło SMTP, kolejka e-maili z ponowieniami, zaproszenia / ponowne wysłanie / link resetu od admina (bez poczty — link do przekazania ręcznie), samodzielny reset z wylogowaniem innych urządzeń i e-mailem „hasło zmienione”. Dodatkowo: prawdziwa lista pracowników z saldem (`leave.js`) i format dat `dd/mm/rrrr` z kalendarzem flatpickr.
 4. ✅ **Pracownicy i wymiar urlopu, kopiowanie wymiaru na nowy rok, wyliczanie zaległego.**
    Zrobione: okno edycji zapisuje wymiar i ręczny zaległy (`PUT /api/admin/allowances/…`, także dla roku bez wymiaru) oraz rolę, konto aktywne i nowe pole „Przełożony” (`PATCH /api/admin/users/:id`); „Przenieś wymiary z poprzedniego roku” (`POST /api/admin/allowances/copy`). Wyłączenie konta usuwa jego sesje; przełożony bez roli lub z wyłączonym kontem → podwładni bez przełożonego (ostrzeżenie); admin nie zmienia sam sobie roli ani nie wyłącza swojego konta; zawsze zostaje aktywny admin. Lista pokazuje przełożonego przy roli.
-5. ⬜ Panel pracownika: saldo, kalendarz (`/api/calendar`), składanie i wycofywanie wniosków.
+5. ✅ **Panel pracownika: saldo, kalendarz, składanie i wycofywanie wniosków.**
+   Zrobione: `routes/requests.js` + walidacja w `leave.js` (dni liczy serwer z `holidays.js` i `company_days_off`, kolizje, saldo, limity — w jednej transakcji), `panel.html` na prawdziwym API (saldo bieżącego roku, saldo innego roku doczytywane przy wyborze terminu, lista zastępców, kto ma wtedy urlop, wycofanie i prośba o anulowanie). Sprawdzone testami API i testem dymnym strony w jsdom. Do kroku 6: e-maile do przełożonego, decyzja o `cancel_requested`, wnioski `pending`, których termin minął.
 6. ⬜ Akceptacja wniosków, e-maile z decyzją, wykrywanie kolizji.
 7. ⬜ Dni wolne w firmie, przeliczanie wniosków, eksport CSV.
 8. ⬜ Cron: przypomnienia i zestawienie tygodniowe, log audytowy (zapis zdarzeń już działa — brak podglądu), kopie zapasowe.
-9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 28 testów — logowanie i ochrona API, saldo i zaległy, trasy kroku 4. Kolejne kroki dopisują swoje testy.
+9. ✅ **Testy automatyczne w repozytorium** (zrobione razem z krokiem 4): `test/` + `docker-compose.test.yml`, 46 testów — logowanie i ochrona API, saldo i zaległy, trasy kroków 4 i 5. Kolejne kroki dopisują swoje testy.
 
 Zamiana danych przykładowych: w każdym pliku HTML blok `/* ===== MOCK … ===== */` zastąpić wywołaniem `fetch` z komentarza obok.
 

@@ -10,6 +10,7 @@ const { loadUser, protectPages, sameOrigin } = require('./auth');
 const authRoutes = require('./routes/auth');
 const meRoutes = require('./routes/me');
 const adminRoutes = require('./routes/admin');
+const requestRoutes = require('./routes/requests');
 const mail = require('./mail');
 const { ensureFirstAdmin } = require('./bootstrap');
 
@@ -74,6 +75,7 @@ app.use(authRoutes);
 
 app.use('/api/me', meRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api', requestRoutes);         // /api/me/balance, /api/me/requests, /api/requests, /api/calendar, /api/people
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nie znaleziono' }));
 
 // Strony HTML: chronione według ról, bez cache (po wylogowaniu „Wstecz” nie pokaże starej strony)
